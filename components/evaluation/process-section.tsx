@@ -60,6 +60,76 @@ export function ProcessSection({ process }: { process: ProcessEvaluation }) {
           note="Not a target to maximize."
         />
       </div>
+
+      {/* V0.2 metrics */}
+      <div>
+        <h3 className="mt-3 border-t border-surface-border pt-3 text-sm font-semibold text-text-primary">
+          V0.2 — Continuous Action Safety
+        </h3>
+        <p className="mt-1 text-xs text-text-secondary">
+          These metrics measure how well the versioned action protocol prevents
+          stale writes and enables Human-Agent coordination.
+        </p>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-4">
+        <Metric
+          label="Stale write rejections"
+          value={process.staleWriteRejectionCount}
+          note="How often Agent tried to update a stale object version. Lower is better, but zero may mean no concurrency pressure."
+        />
+        <Metric
+          label="Human messages"
+          value={process.humanMessageCount}
+        />
+        <Metric
+          label="Acknowledged messages"
+          value={process.acknowledgedHumanMessageCount}
+        />
+        <Metric
+          label="Message ack rate"
+          value={percent(process.humanMessageAckRate)}
+          note="Rate at which Agent acknowledged non-blocking human messages."
+        />
+        <Metric
+          label="Accepted agent actions"
+          value={`${process.acceptedAgentActionCount} / ${process.totalAgentApplyResults}`}
+        />
+        <Metric
+          label="Agent action accept rate"
+          value={percent(process.acceptedAgentActionRate)}
+          note="Proportion of Agent actions that succeeded. High may indicate stable protocol; low may indicate heavy conflict."
+        />
+        <Metric
+          label="Discarded stale responses"
+          value={process.discardedStaleRunResponseCount}
+          note="Count of Agent responses discarded due to stale runId/stepId."
+        />
+        <Metric
+          label="Repeated stale writes"
+          value={process.repeatedStaleWriteCount}
+        />
+        <Metric
+          label="Duplicate sources"
+          value={process.duplicateSourceCount}
+        />
+        <Metric
+          label="Message resolution rate"
+          value={percent(process.messageResolutionRate)}
+        />
+        <Metric
+          label="Replies without action"
+          value={process.agentReplyWithoutActionCount}
+        />
+        <Metric
+          label="Revision resolution rate"
+          value={percent(process.humanRevisionResolutionRate)}
+        />
+        <Metric
+          label="Unresolved revisions"
+          value={process.unresolvedHumanRevisionCount}
+        />
+      </div>
     </section>
   );
 }

@@ -1,12 +1,15 @@
 import { z } from "zod";
 
 const reasonSchema = z.string().min(1).optional();
+const actionIdSchema = z.string().min(1).optional();
+const expectedVersionSchema = z.number().int().positive().optional();
 
 export const workspaceActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("SEARCH_SOURCE"),
     payload: z.object({ query: z.string().min(1) }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("ADD_SOURCE"),
@@ -16,8 +19,12 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       url: z.string().url().optional(),
       publishedAt: z.string().optional(),
       summary: z.string().min(1),
+      fileName: z.string().optional(),
+      mediaType: z.enum(["markdown", "demo", "manual"]).optional(),
+      content: z.string().optional(),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("EDIT_SOURCE"),
@@ -28,8 +35,10 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       url: z.string().url().optional(),
       publishedAt: z.string().optional(),
       summary: z.string().min(1),
+      expectedVersion: expectedVersionSchema,
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("ADD_EVIDENCE"),
@@ -37,8 +46,13 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       sourceId: z.string().min(1),
       quoteOrFinding: z.string().min(1),
       relevance: z.string().min(1),
+      section: z.string().optional(),
+      startLine: z.number().int().positive().optional(),
+      endLine: z.number().int().positive().optional(),
+      polarity: z.enum(["supporting", "counter", "context"]).optional(),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("EDIT_EVIDENCE"),
@@ -46,8 +60,14 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       evidenceId: z.string().min(1),
       quoteOrFinding: z.string().min(1),
       relevance: z.string().min(1),
+      section: z.string().optional(),
+      startLine: z.number().int().positive().optional(),
+      endLine: z.number().int().positive().optional(),
+      polarity: z.enum(["supporting", "counter", "context"]).optional(),
+      expectedVersion: expectedVersionSchema,
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("ADD_NOTE"),
@@ -57,6 +77,7 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       evidenceIds: z.array(z.string()),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("EDIT_NOTE"),
@@ -65,8 +86,10 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       content: z.string().min(1),
       sourceIds: z.array(z.string()),
       evidenceIds: z.array(z.string()),
+      expectedVersion: expectedVersionSchema,
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("PROPOSE_CLAIM"),
@@ -78,6 +101,7 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       confidence: z.number().min(0).max(1).optional(),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("UPDATE_CLAIM"),
@@ -99,8 +123,10 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
         ])
         .optional(),
       humanDecisionNote: z.string().optional(),
+      expectedVersion: expectedVersionSchema,
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("CHALLENGE_CLAIM"),
@@ -108,8 +134,10 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       claimId: z.string().min(1),
       counterEvidenceIds: z.array(z.string()),
       note: z.string().min(1),
+      expectedVersion: expectedVersionSchema,
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("REQUEST_HUMAN_INPUT"),
@@ -118,6 +146,7 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       relatedObjectIds: z.array(z.string()),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("ANSWER_HUMAN_INPUT"),
@@ -126,13 +155,21 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       answer: z.string().min(1),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("EDIT_BRIEF"),
     payload: z.object({
       markdown: z.string(),
+      expectedVersion: expectedVersionSchema,
+      derivation: z.object({
+        claimVersions: z.record(z.string(), z.number()),
+        evidenceVersions: z.record(z.string(), z.number()),
+        generatedFromEventIds: z.array(z.string()),
+      }).optional(),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("WAIT"),
@@ -140,29 +177,91 @@ export const workspaceActionSchema = z.discriminatedUnion("type", [
       waitingFor: z.string().min(1),
     }),
     reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
   z.object({
     type: z.literal("FINISH"),
     payload: z.object({}),
     reason: reasonSchema,
+    actionId: actionIdSchema,
+  }),
+  z.object({
+    type: z.literal("SEND_TEAMMATE_MESSAGE"),
+    payload: z.object({
+      content: z.string().min(1),
+      relatedObjectIds: z.array(z.string()),
+    }),
+    reason: reasonSchema,
+    actionId: actionIdSchema,
+  }),
+  z.object({
+    type: z.literal("REPLY_TEAMMATE_MESSAGE"),
+    payload: z.object({
+      content: z.string().min(1),
+      inReplyToMessageId: z.string().min(1).optional(),
+      relatedObjectIds: z.array(z.string()),
+    }),
+    reason: reasonSchema,
+    actionId: actionIdSchema,
+  }),
+  z.object({
+    type: z.literal("MARK_MESSAGE_READ"),
+    payload: z.object({
+      messageId: z.string().min(1),
+    }),
+    reason: reasonSchema,
+    actionId: actionIdSchema,
+  }),
+  z.object({
+    type: z.literal("RESOLVE_TEAMMATE_MESSAGE"),
+    payload: z.object({
+      messageId: z.string().min(1),
+      resolvedByActionIds: z.array(z.string().min(1)).min(1),
+    }),
+    reason: reasonSchema,
+    actionId: actionIdSchema,
   }),
 ]);
+
+type ParsedWorkspaceAction = z.infer<typeof workspaceActionSchema>;
+
+function hasRequiredAgentExpectedVersion(action: ParsedWorkspaceAction): boolean {
+  switch (action.type) {
+    case "EDIT_SOURCE":
+    case "EDIT_EVIDENCE":
+    case "EDIT_NOTE":
+    case "UPDATE_CLAIM":
+    case "CHALLENGE_CLAIM":
+    case "EDIT_BRIEF":
+      return action.payload.expectedVersion !== undefined;
+    default:
+      return true;
+  }
+}
 
 export const agentTurnSchema = z.object({
   situation: z.string(),
   nextGoal: z.string(),
   actions: z
     .array(
-      workspaceActionSchema.refine(
-        (action) =>
-          action.type !== "ANSWER_HUMAN_INPUT" && action.type !== "FINISH",
-        {
+      workspaceActionSchema
+        .refine(
+          (action) =>
+            action.type !== "ANSWER_HUMAN_INPUT" &&
+            action.type !== "FINISH" &&
+            action.type !== "SEND_TEAMMATE_MESSAGE",
+          {
+            message:
+              "Agent turns cannot include human-only ANSWER_HUMAN_INPUT, FINISH, or SEND_TEAMMATE_MESSAGE actions.",
+          },
+        )
+        .refine(hasRequiredAgentExpectedVersion, {
           message:
-            "Agent turns cannot include human-only ANSWER_HUMAN_INPUT or FINISH actions.",
-        },
-      ),
+            "Agent existing-object update actions must include expectedVersion.",
+        }),
     )
     .max(3),
+  acknowledgedHumanEventIds: z.array(z.string()).optional(),
   stopReason: z.enum([
     "turn_complete",
     "waiting_for_human",
@@ -174,6 +273,6 @@ export const agentTurnSchema = z.object({
 export type WorkspaceAction = z.infer<typeof workspaceActionSchema>;
 export type AgentAction = Exclude<
   WorkspaceAction,
-  { type: "ANSWER_HUMAN_INPUT" } | { type: "FINISH" }
+  { type: "ANSWER_HUMAN_INPUT" } | { type: "FINISH" } | { type: "SEND_TEAMMATE_MESSAGE" }
 >;
 export type AgentTurn = z.infer<typeof agentTurnSchema>;

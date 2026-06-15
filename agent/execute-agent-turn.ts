@@ -9,6 +9,7 @@ export type AgentExecutionResult = {
   state: WorkspaceState;
 };
 
+/** V0.1: execute a turn and return turn + applied state. */
 export function executeAgentTurn(state: WorkspaceState): AgentExecutionResult {
   const context = buildAgentContext(state);
   const turn = agentTurnSchema.parse(runMockAgent(context));
@@ -22,4 +23,10 @@ export function executeAgentTurn(state: WorkspaceState): AgentExecutionResult {
     turn,
     state: nextState,
   };
+}
+
+/** V0.2: return just the AgentTurn without applying actions server-side. */
+export function getAgentTurn(state: WorkspaceState): AgentTurn {
+  const context = buildAgentContext(state);
+  return agentTurnSchema.parse(runMockAgent(context));
 }

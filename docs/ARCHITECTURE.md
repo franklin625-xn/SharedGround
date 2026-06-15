@@ -1,137 +1,110 @@
 # SharedGround Architecture
 
-SharedGround is a single Next.js application that models human-agent collaboration as state transitions over a shared research workspace.
+SharedGround is a single Next.js application that models human-agent collaboration as versioned state transitions over a shared research workspace.
 
-## Core Model
+## Core Model (V0.2)
 
-The workspace state lives in `core/types.ts` and contains:
+The workspace state lives in `core/types.ts`:
 
-- `task`: the research question, scope, source mode, and creation metadata.
-- `sources`: research materials added by the system, human, or agent.
-- `evidence`: findings linked to source IDs.
-- `notes`: research notes linked to sources and evidence.
-- `claims`: analytical claims with evidence IDs, confidence, status, and optional human decision notes.
-- `brief`: the final markdown deliverable.
-- `events`: the auditable activity log.
-- `agentStatus`: `idle`, `working`, `waiting_for_human`, `blocked`, or `completed`.
-- `pendingHumanRequest`: an open or answered handoff request.
-- `completed`: whether the human has marked the task complete.
+- `task` — research question, scope, source mode.
+- `sources` — research materials with version, content hash, line count.
+- `evidence` — findings with source version/hash anchors and line ranges.
+- `notes` — research notes linked to sources and evidence.
+- `claims` — analytical claims with evidence, status workflow, version.
+- `brief` — final markdown deliverable with derivation metadata.
+- `messages` — non-blocking teammate messages with pending/read/resolved/blocked status.
+- `events` — slim auditable activity log with version diffs.
+- `agentControl` — run/step lifecycle, acknowledged Human events, stale discard count.
 
-This state is the product surface. The UI, mock agent, real-agent route, and evaluation layer all read and write this same object model.
+All domain objects carry `VersionedMetadata` (version, createdAt, updatedAt, createdBy, updatedBy).
 
-## Structured Actions
+## V0.2 Continuous Action Protocol
 
-All workspace mutations go through typed actions defined in `agent/action-schema.ts` and `core/schemas.ts`.
+```
+Browser Workspace Store
+  → Human actions immediately apply through reducer
+  → Agent loop calls /api/agent-step with latest snapshot
+  → API returns AgentTurn / proposed actions only (no state)
+  → Browser applies each action against latest local state
+  → Reducer accepts, rejects (STALE_OBJECT_VERSION), or rejects (BRIEF_CLAIM_UNREVIEWED)
+  → Agent receives apply results and re-reads latest state
+  → Loop continues, pauses, waits for human, completes, or errors
+```
 
-The action space includes:
+Key invariants:
+- The API never returns an authoritative replacement `WorkspaceState`.
+- Agent updates on existing objects must include `expectedVersion`.
+- Human actions do not require `expectedVersion` and always win.
+- Source content is immutable; events never contain full source content.
 
-- source operations: `ADD_SOURCE`, `EDIT_SOURCE`, `SEARCH_SOURCE`;
-- evidence operations: `ADD_EVIDENCE`, `EDIT_EVIDENCE`;
-- note operations: `ADD_NOTE`, `EDIT_NOTE`;
-- claim operations: `PROPOSE_CLAIM`, `UPDATE_CLAIM`, `CHALLENGE_CLAIM`;
-- control handoff: `REQUEST_HUMAN_INPUT`, `ANSWER_HUMAN_INPUT`, `WAIT`;
-- deliverable control: `EDIT_BRIEF`, `FINISH`.
+## Action Space
 
-Agent turns are validated by Zod and limited to at most three actions. The agent may not emit `ANSWER_HUMAN_INPUT` or `FINISH`.
+All workspace mutations go through typed, Zod-validated actions:
+
+- Source: `ADD_SOURCE`, `EDIT_SOURCE`, `SEARCH_SOURCE`
+- Evidence: `ADD_EVIDENCE`, `EDIT_EVIDENCE`
+- Notes: `ADD_NOTE`, `EDIT_NOTE`
+- Claims: `PROPOSE_CLAIM`, `UPDATE_CLAIM`, `CHALLENGE_CLAIM`
+- Control: `REQUEST_HUMAN_INPUT`, `ANSWER_HUMAN_INPUT`, `WAIT`
+- Deliverable: `EDIT_BRIEF`, `FINISH`
+- V0.2 messages: `SEND_TEAMMATE_MESSAGE` (Human-only), `REPLY_TEAMMATE_MESSAGE`, `MARK_MESSAGE_READ`, `RESOLVE_TEAMMATE_MESSAGE`
+
+Agent turns capped at 3 actions. Agent may not emit `ANSWER_HUMAN_INPUT`, `FINISH`, or `SEND_TEAMMATE_MESSAGE`.
 
 ## Reducer And Permissions
 
-`core/reducer.ts` is the only place where actions become workspace changes. It performs three jobs:
+`core/reducer.ts` is the only mutation point:
 
-1. checks reducer-level permissions through `core/permissions.ts`;
-2. validates referenced object IDs before accepting links;
-3. appends an event for every accepted or rejected action.
+1. Checks permissions through `core/permissions.ts`.
+2. Validates `expectedVersion` for Agent updates → `STALE_OBJECT_VERSION`.
+3. Prevents Agent claim regression → `AGENT_STATE_REGRESSION`.
+4. Validates Agent Brief derivation → `BRIEF_CLAIM_UNREVIEWED`.
+5. Validates reference IDs, evidence line ranges, content immutability.
+6. Records slim events with version diffs and rejection codes.
 
-Important permission rules:
+New events never persist full `WorkspaceState`, `Source.content`, `before`, `after`, `legacyBefore`, or `legacyAfter`. Compatibility fields may be read during migration, but persist cleanup drops them.
 
-- humans cannot perform agent-only control actions such as `WAIT`;
-- agents cannot answer human input requests;
-- agents cannot finish the task;
-- agents cannot set claim status to `human_confirmed`, `human_revised`, or `final`;
-- rejected actions are logged as `ACTION_REJECTED`.
+Markdown sources are deduplicated by `contentHash`. Identical uploads are rejected with `DUPLICATE_SOURCE`; same filename with different content is treated as a trackable new version/upload.
 
-These rules are not only UI affordances. They are enforced in the reducer.
+## Agent Step Loop
 
-## Controlled Autonomy Loop
+`store/workspace-store.ts` owns the step loop:
 
-The agent is treated as a task participant, not as a chat assistant.
+- `startAgent()` → creates `runId`, sets status to `running`.
+- `pauseAgent()` → aborts fetch via per-step `AbortController`, invalidates run.
+- `resumeAgent()` → creates fresh `runId` from latest workspace.
+- `runAgentStep()` → fetch `/api/agent-step` → stale check (runId/stepId match BEFORE JSON parse) → apply actions via `applyWorkspaceActionWithResult` → route stop reason.
+- `scheduleNextStep()` → `setTimeout(0)` to allow React re-render between steps.
+- `partialize` clears `activeRunId`/`activeStepId` and old audit snapshots before localStorage persist.
+- localStorage `QuotaExceededError` is caught by the safe storage wrapper; current in-memory state remains active and the UI offers Debug Bundle export.
 
-```text
-Workspace State
-      |
-      v
-Build Agent Context
-      |
-      v
-Mock Agent or Real Agent API
-      |
-      v
-Validate AgentTurn with Zod
-      |
-      v
-Apply Actions Through Reducer
-      |
-      v
-Updated Workspace + Event Log
+## Brief Derivation And Stale Detection
+
+`core/brief-stale.ts` provides pure selectors:
+
+- `briefIsStale(state)` — checks derivation claim/evidence versions against current state.
+- `briefStaleReason(state)` — human-readable reason.
+- Stale = any cited claim/evidence deleted, version changed, or claim regressed from human-reviewed.
+
+Agent must include derivation metadata when drafting Brief. Reducer rejects Briefs citing `ai_proposed`, `contested`, or `evidence_insufficient` claims.
+
+## Evaluation Layer (V0.1 + V0.2)
+
+V0.1 metrics: outcome (grounded claims, citation integrity), process (human override rate, request effectiveness), traceability (evidence chain completeness).
+
+V0.2 metrics: stale write rejections, repeated stale writes, duplicate source attempts, human message acknowledgement/resolution rates, agent replies without supporting action, human revision resolution rate, accepted agent action rate, source location completeness, Brief stale detection, discarded stale responses.
+
+## Debug Bundle
+
+The workspace header provides **Export Debug Bundle**, producing `sharedground-debug-bundle.json` with task, objects, slim events, messages, evaluation summary, runtime mode, and storage diagnostics:
+
+```
+totalBytes, sourcesBytes, eventsBytes, evidenceBytes, notesBytes,
+claimsBytes, briefBytes, messagesBytes
 ```
 
-The loop is implemented across:
-
-- `agent/build-context.ts`;
-- `agent/mock-agent.ts`;
-- `agent/execute-agent-turn.ts`;
-- `app/api/agent/route.ts`;
-- `core/reducer.ts`.
-
-If a human request is open, the mock agent emits `WAIT`. If the final framing needs human judgment, it emits `REQUEST_HUMAN_INPUT`. After the human answers, it drafts the brief.
-
-## Mock Agent And Real-Agent Fallback
-
-The mock agent provides a deterministic EU industrial policy demo trajectory. This keeps the demo stable and testable.
-
-The real-agent path is available through `app/api/agent/route.ts` when:
-
-```bash
-USE_MOCK_AGENT=false
-OPENAI_API_KEY=...
-```
-
-The route builds a system prompt, sends a workspace snapshot to an OpenAI-compatible chat completion endpoint, parses JSON, validates the result with Zod, retries once on invalid structure, and falls back to the mock agent if the real call fails.
-
-## UI And Persistence
-
-The UI is split into:
-
-- landing page: demo loading and custom task creation;
-- workspace page: sources, evidence, notes, claims, brief, human requests, controls, and activity log;
-- evaluation page: outcome, process, traceability, and exports.
-
-`store/workspace-store.ts` uses Zustand with localStorage persistence. This is enough for a V0.1 single-user demo and avoids databases, login, Redis, and WebSockets.
-
-## Evaluation Layer
-
-The evaluation layer lives in `eval/` and measures:
-
-- outcome: completion, final claims, grounded final claims, citation integrity;
-- process: agent/human action counts, human revisions, overrides, request effectiveness, waits, unauthorized actions;
-- traceability: whether final claims connect to evidence, sources, human decisions, and the brief.
-
-The evaluation page exports:
-
-- `evaluation-summary.json`;
-- `evaluation-summary.md`.
-
-These exports make the collaboration process inspectable rather than treating the final brief as the only output.
+The bundle intentionally stores Markdown content only in `sources`; events, messages, derivation metadata, and runtime diagnostics do not duplicate source bodies.
 
 ## Design Constraints
 
-V0.1 intentionally keeps the architecture small:
-
-- no database;
-- no multi-user state;
-- no WebSocket runtime;
-- no external search dependency;
-- no vector database;
-- no multi-agent framework.
-
-The main architecture bet is that the collaboration protocol matters more than backend scale for this demo: shared state, typed actions, reducer permissions, control handoff, and auditability.
+Explicitly excluded: WebSocket, SSE, Redis, database, multi-user, login, CRDT, auto-merge, vector search, RAG, PDF/OCR, live web search, multi-agent, source deletion, page-refresh auto-resume.

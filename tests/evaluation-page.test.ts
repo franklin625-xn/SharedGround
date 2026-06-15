@@ -16,6 +16,7 @@ function evaluationSummary(): EvaluationSummary {
       groundedClaimRate: 1,
       citationIntegrityRate: 0.5,
       missingCitationIds: ["missing-evidence"],
+      briefStaleDetected: false,
     },
     process: {
       agentActionCount: 4,
@@ -30,6 +31,20 @@ function evaluationSummary(): EvaluationSummary {
       correctWaitCount: 1,
       unauthorizedActionCount: 1,
       respectedHumanModification: true,
+      staleWriteRejectionCount: 0,
+      humanMessageCount: 0,
+      acknowledgedHumanMessageCount: 0,
+      humanMessageAckRate: 0,
+      acceptedAgentActionCount: 3,
+      totalAgentApplyResults: 4,
+      acceptedAgentActionRate: 0.75,
+      discardedStaleRunResponseCount: 0,
+      repeatedStaleWriteCount: 0,
+      duplicateSourceCount: 0,
+      messageResolutionRate: 1,
+      agentReplyWithoutActionCount: 0,
+      humanRevisionResolutionRate: 1,
+      unresolvedHumanRevisionCount: 0,
     },
     traceability: {
       items: [
@@ -45,12 +60,18 @@ function evaluationSummary(): EvaluationSummary {
       completeTraceCount: 0,
       totalTraceCount: 1,
       completeTraceRate: 0,
+      evidenceWithSourceVersionCount: 1,
+      evidenceWithSourceHashCount: 1,
+      evidenceWithValidLineRange: 0,
+      totalAgentExtractedEvidence: 1,
+      sourceLocationCompletenessRate: 0,
     },
   };
 }
 
 function workspace(): WorkspaceState {
   return {
+    schemaVersion: 2,
     task: {
       id: "task-1",
       title: "EU industrial policy and Chinese investment",
@@ -74,15 +95,30 @@ function workspace(): WorkspaceState {
         createdBy: "agent",
         createdAt: "2026-06-15T00:00:00.000Z",
         updatedAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedBy: "agent",
       },
     ],
     brief: {
       markdown: "# Brief",
       updatedBy: "human",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      createdAt: "2026-06-15T00:00:00.000Z",
+      createdBy: "system",
     },
     events: [],
     agentStatus: "completed",
+    agentControl: {
+      status: "completed",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "mock",
+    },
+    humanMessages: [],
     completed: true,
   };
 }
@@ -95,7 +131,6 @@ describe("Evaluation page", () => {
   beforeEach(() => {
     useWorkspaceStore.setState({
       workspace: workspace(),
-      agentRunning: false,
       agentError: null,
       agentMode: "idle",
     });
@@ -152,6 +187,11 @@ describe("Evaluation page", () => {
         completeTraceCount: 0,
         totalTraceCount: 0,
         completeTraceRate: 0,
+        evidenceWithSourceVersionCount: 0,
+        evidenceWithSourceHashCount: 0,
+        evidenceWithValidLineRange: 0,
+        totalAgentExtractedEvidence: 0,
+        sourceLocationCompletenessRate: 0,
       },
     };
 

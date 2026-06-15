@@ -5,6 +5,8 @@ export type OutcomeEvaluation = {
   groundedClaimRate: number;
   citationIntegrityRate: number;
   missingCitationIds: string[];
+  // V0.2
+  briefStaleDetected: boolean;
 };
 
 export type ProcessEvaluation = {
@@ -20,6 +22,21 @@ export type ProcessEvaluation = {
   correctWaitCount: number;
   unauthorizedActionCount: number;
   respectedHumanModification: boolean;
+  // V0.2
+  staleWriteRejectionCount: number;
+  humanMessageCount: number;
+  acknowledgedHumanMessageCount: number;
+  humanMessageAckRate: number;
+  acceptedAgentActionCount: number;
+  totalAgentApplyResults: number;
+  acceptedAgentActionRate: number;
+  discardedStaleRunResponseCount: number;
+  repeatedStaleWriteCount: number;
+  duplicateSourceCount: number;
+  messageResolutionRate: number;
+  agentReplyWithoutActionCount: number;
+  humanRevisionResolutionRate: number;
+  unresolvedHumanRevisionCount: number;
 };
 
 export type TraceEvaluationItem = {
@@ -36,6 +53,12 @@ export type TraceEvaluation = {
   completeTraceCount: number;
   totalTraceCount: number;
   completeTraceRate: number;
+  // V0.2
+  evidenceWithSourceVersionCount: number;
+  evidenceWithSourceHashCount: number;
+  evidenceWithValidLineRange: number;
+  totalAgentExtractedEvidence: number;
+  sourceLocationCompletenessRate: number;
 };
 
 export type EvalRuleResult = {

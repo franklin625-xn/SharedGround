@@ -38,10 +38,12 @@ function selectedValues(options: HTMLCollectionOf<HTMLOptionElement>) {
 export function ClaimCard({
   claim,
   evidence,
+  inBrief,
   onAction,
 }: {
   claim: Claim;
   evidence: Evidence[];
+  inBrief?: boolean;
   onAction: (action: WorkspaceAction) => void;
 }) {
   const [mode, setMode] = useState<
@@ -115,6 +117,11 @@ export function ClaimCard({
         <span className={statusClass[claim.status] || "badge"}>
           {statusLabel[claim.status] || claim.status}
         </span>
+        {inBrief && (
+          <span className="text-2xs text-accent-blue" title="Referenced in the final Brief">
+            📝 Brief
+          </span>
+        )}
         <span className="text-2xs text-text-muted">
           by{" "}
           <span className={claim.createdBy === "human" ? "actor-human" : "actor-agent"}>

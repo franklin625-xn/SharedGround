@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, type FormEvent } from "react";
+import React, { useState, useRef, type ChangeEvent, type FormEvent } from "react";
 import {
   buildAddEvidenceAction,
   buildAddSourceAction,
+  buildAddSourceFromFiles,
   buildEditEvidenceAction,
   buildEditSourceAction,
 } from "@/core/human-actions";
@@ -48,6 +49,53 @@ export function SourcesPanel({
     quoteOrFinding: "",
     relevance: "",
   });
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const [pendingReplaceAction, setPendingReplaceAction] =
+    useState<WorkspaceAction | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const fileList = event.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setUploading(true);
+    const actions: WorkspaceAction[] = [];
+    const files = Array.from(fileList).filter((f) => f.name.endsWith(".md"));
+
+    for (const file of files) {
+      const text = await file.text();
+      const existingSameContent = sources.find((source) => source.content === text);
+      if (existingSameContent) {
+        const replacement = buildEditSourceAction({
+          sourceId: existingSameContent.id,
+          title: file.name.replace(/\.md$/i, ""),
+          publisher: existingSameContent.publisher || "Uploaded",
+          summary: text.slice(0, 200).replace(/\n/g, " "),
+        });
+        setPendingReplaceAction(replacement);
+        setUploadNotice("This file is identical to an existing source.");
+        continue;
+      }
+
+      const existingSameName = sources.find(
+        (source) => source.fileName === file.name && source.content !== text,
+      );
+      if (existingSameName) {
+        setUploadNotice("This filename already exists with different content. It will be uploaded as a new version.");
+      }
+
+      actions.push(...buildAddSourceFromFiles([{ name: file.name, content: text }]));
+    }
+
+    for (const action of actions) {
+      onAction(action);
+    }
+
+    setUploading(false);
+    // Reset input so the same file can be re-uploaded
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   function submitSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -162,6 +210,18 @@ export function SourcesPanel({
           >
             Add Source
           </button>
+          <label className={`btn-secondary px-2 py-1 text-2xs cursor-pointer ${uploading ? "opacity-50" : ""}`}>
+            {uploading ? "Uploading…" : "Upload .md"}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,text/markdown,text/plain"
+              multiple
+              className="hidden"
+              onChange={handleFileUpload}
+              disabled={uploading}
+            />
+          </label>
         </div>
       </div>
 
@@ -233,6 +293,37 @@ export function SourcesPanel({
             </button>
           </div>
         </form>
+      )}
+
+      {uploadNotice && (
+        <div className="card-sm mb-2 border-accent-blue/30 bg-blue-50/60">
+          <p className="text-2xs text-text-secondary">{uploadNotice}</p>
+          <div className="mt-1 flex justify-end gap-1">
+            <button
+              type="button"
+              className="btn-ghost px-2 py-1 text-2xs"
+              onClick={() => {
+                setUploadNotice(null);
+                setPendingReplaceAction(null);
+              }}
+            >
+              Skip
+            </button>
+            {pendingReplaceAction && (
+              <button
+                type="button"
+                className="btn-secondary px-2 py-1 text-2xs"
+                onClick={() => {
+                  onAction(pendingReplaceAction);
+                  setUploadNotice(null);
+                  setPendingReplaceAction(null);
+                }}
+              >
+                Replace existing
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       {showEvidenceForm && (

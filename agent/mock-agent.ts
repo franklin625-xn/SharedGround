@@ -2,6 +2,71 @@ import type { AgentAction, AgentTurn } from "@/agent/action-schema";
 import type { AgentContext } from "@/agent/build-context";
 
 export function runMockAgent(context: AgentContext): AgentTurn {
+  const pendingMessage = context.messages.find(
+    (message) => message.actor === "human" && message.status === "pending",
+  );
+  if (pendingMessage) {
+    const relatedClaim =
+      pendingMessage.relatedObjectIds
+        .map((id) => context.allClaims.find((claim) => claim.id === id))
+        .find(Boolean) ??
+      context.allClaims.find((claim) =>
+        ["human_revised", "evidence_insufficient", "contested"].includes(
+          claim.status,
+        ),
+      );
+    const messageEventId = context.unacknowledgedMessages.find(
+      (event) => event.objectId === pendingMessage.id,
+    )?.id;
+    const actions: AgentAction[] = [
+      {
+        type: "REPLY_TEAMMATE_MESSAGE",
+        payload: {
+          content:
+            "I have read your note. I will treat the requested distinction as unresolved, avoid strengthening the brief, and update the workspace before drafting.",
+          inReplyToMessageId: pendingMessage.id,
+          relatedObjectIds: pendingMessage.relatedObjectIds,
+        },
+        reason: "Agent visibly acknowledges the human teammate message.",
+      },
+    ];
+
+    if (relatedClaim) {
+      actions.push({
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: relatedClaim.id,
+          status: "evidence_insufficient",
+          humanDecisionNote:
+            "Human requested additional support before this claim can be used strongly in the brief.",
+          expectedVersion: relatedClaim.version,
+        },
+        reason: "Human feedback requires lowering claim strength until evidence is added.",
+      });
+    }
+
+    actions.push({
+      type: "REQUEST_HUMAN_INPUT",
+      payload: {
+        question:
+          "Please provide or confirm source material for the requested distinction before I revise the brief.",
+        relatedObjectIds: relatedClaim
+          ? [relatedClaim.id]
+          : pendingMessage.relatedObjectIds,
+      },
+      reason: "The current workspace does not contain enough evidence to resolve the human request.",
+    });
+
+    return {
+      situation:
+        "A pending human teammate message requires explicit response before continuing.",
+      nextGoal: "Acknowledge the message and avoid unsupported brief changes.",
+      actions: actions.slice(0, 3),
+      acknowledgedHumanEventIds: messageEventId ? [messageEventId] : [],
+      stopReason: "waiting_for_human",
+    };
+  }
+
   if (context.openHumanRequest) {
     return {
       situation: "The agent is waiting for a human decision before drafting.",
@@ -135,6 +200,23 @@ export function runMockAgent(context: AgentContext): AgentTurn {
 function buildBriefAction(context: AgentContext): AgentAction {
   const answer = context.answeredHumanRequest?.answer ?? "Focus on EV batteries.";
 
+  // Snapshot reviewed claim versions and evidence versions for derivation
+  const reviewedClaims = context.allClaims.filter(
+    (c) => ["human_confirmed", "human_revised", "final"].includes(c.status),
+  );
+  const claimVersions: Record<string, number> = {};
+  for (const c of reviewedClaims) {
+    claimVersions[c.id] = c.version;
+  }
+  const evidenceVersions: Record<string, number> = {};
+  for (const e of context.evidence) {
+    evidenceVersions[e.id] = e.version;
+  }
+  const reviewEventIds = context.humanEvents
+    .filter((e) => e.objectType === "claim")
+    .slice(-3)
+    .map((e) => e.id);
+
   return {
     type: "EDIT_BRIEF",
     payload: {
@@ -157,6 +239,12 @@ EU industrial policy is reshaping Chinese investment in Europe by making localiz
 ## Open Human Judgment
 
 The final version should keep the human-selected emphasis visible and treat the agent claims as provisional until reviewed.`,
+      expectedVersion: context.briefVersion,
+      derivation: {
+        claimVersions,
+        evidenceVersions,
+        generatedFromEventIds: reviewEventIds,
+      },
     },
     reason: "Mock agent drafts the brief after receiving human direction.",
   };

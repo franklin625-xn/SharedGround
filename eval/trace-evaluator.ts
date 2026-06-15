@@ -55,16 +55,57 @@ function evaluateTraceItem(
   };
 }
 
+// ── V0.2: source location completeness ──
+
+function evaluateSourceLocationCompleteness(state: WorkspaceState) {
+  const agentEvidence = state.evidence.filter(
+    (e) => e.createdBy === "agent",
+  );
+  const total = agentEvidence.length;
+
+  let withSourceVersion = 0;
+  let withSourceHash = 0;
+  let withValidLineRange = 0;
+
+  for (const ev of agentEvidence) {
+    if (ev.sourceVersion !== undefined) withSourceVersion++;
+    if (ev.sourceContentHash !== undefined) withSourceHash++;
+    if (
+      ev.startLine !== undefined &&
+      ev.endLine !== undefined &&
+      ev.startLine > 0 &&
+      ev.endLine >= ev.startLine
+    ) {
+      withValidLineRange++;
+    }
+  }
+
+  return {
+    total,
+    withSourceVersion,
+    withSourceHash,
+    withValidLineRange,
+    rate: total > 0 ? withValidLineRange / total : 0,
+  };
+}
+
 export function evaluateTraceability(state: WorkspaceState): TraceEvaluation {
   const items = getFinalClaims(state).map((claim) =>
     evaluateTraceItem(state, claim),
   );
   const completeTraceCount = items.filter((item) => item.complete).length;
+  const location = evaluateSourceLocationCompleteness(state);
 
   return {
     items,
     completeTraceCount,
     totalTraceCount: items.length,
     completeTraceRate: completeTraceCount / Math.max(items.length, 1),
+    // V0.2
+    evidenceWithSourceVersionCount: location.withSourceVersion,
+    evidenceWithSourceHashCount: location.withSourceHash,
+    evidenceWithValidLineRange: location.withValidLineRange,
+    totalAgentExtractedEvidence: location.total,
+    sourceLocationCompletenessRate: location.rate,
   };
 }

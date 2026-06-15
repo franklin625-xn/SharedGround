@@ -3,6 +3,7 @@ import {
   buildAddEvidenceAction,
   buildAddNoteAction,
   buildAddSourceAction,
+  buildAddSourceFromFiles,
   buildAnswerHumanInputAction,
   buildConfirmClaimAction,
   buildContestClaimAction,
@@ -215,5 +216,44 @@ describe("human action builders", () => {
       payload: {},
       reason: "Human completed the task.",
     });
+  });
+
+  // ── Phase 3: multi-file upload builder ──
+
+  it("buildAddSourceFromFiles creates one ADD_SOURCE per file with content fields", () => {
+    const actions = buildAddSourceFromFiles([
+      { name: "nzia.md", content: "# NZIA\n\nOverview of the act." },
+      { name: "crma.md", content: "# CRMA\n\nRaw materials regulation." },
+    ]);
+
+    expect(actions).toHaveLength(2);
+
+    expect(actions[0]).toMatchObject({
+      type: "ADD_SOURCE",
+      payload: {
+        title: "nzia",
+        publisher: "Uploaded",
+        fileName: "nzia.md",
+        mediaType: "markdown",
+        content: "# NZIA\n\nOverview of the act.",
+      },
+      reason: expect.stringContaining("uploaded"),
+    });
+
+    expect(actions[1]).toMatchObject({
+      type: "ADD_SOURCE",
+      payload: {
+        title: "crma",
+        publisher: "Uploaded",
+        fileName: "crma.md",
+        mediaType: "markdown",
+        content: "# CRMA\n\nRaw materials regulation.",
+      },
+      reason: expect.stringContaining("uploaded"),
+    });
+  });
+
+  it("buildAddSourceFromFiles produces empty array for empty input", () => {
+    expect(buildAddSourceFromFiles([])).toEqual([]);
   });
 });

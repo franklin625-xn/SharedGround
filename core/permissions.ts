@@ -21,7 +21,13 @@ export function canApplyWorkspaceAction(
   }
 
   if (actor === "human") {
-    if (action.type === "SEARCH_SOURCE" || action.type === "WAIT") {
+    if (
+      action.type === "SEARCH_SOURCE" ||
+      action.type === "WAIT" ||
+      action.type === "REPLY_TEAMMATE_MESSAGE" ||
+      action.type === "MARK_MESSAGE_READ" ||
+      action.type === "RESOLVE_TEAMMATE_MESSAGE"
+    ) {
       return {
         allowed: false,
         reason: `Human cannot perform ${action.type}; this action is reserved for agent control flow.`,
@@ -35,6 +41,13 @@ export function canApplyWorkspaceAction(
     return {
       allowed: false,
       reason: "Agent cannot answer human input requests.",
+    };
+  }
+
+  if (action.type === "SEND_TEAMMATE_MESSAGE") {
+    return {
+      allowed: false,
+      reason: "Agent cannot send teammate messages.",
     };
   }
 

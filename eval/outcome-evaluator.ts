@@ -5,6 +5,7 @@ import {
   getFinalClaims,
 } from "@/eval/rules/evidence-grounding";
 import { evaluateCitationIntegrity } from "@/eval/rules/citation-integrity";
+import { briefIsStale } from "@/core/brief-stale";
 
 export function evaluateOutcome(state: WorkspaceState): OutcomeEvaluation {
   const finalClaimCount = getFinalClaims(state).length;
@@ -18,5 +19,7 @@ export function evaluateOutcome(state: WorkspaceState): OutcomeEvaluation {
     groundedClaimRate: groundedFinalClaimCount / Math.max(finalClaimCount, 1),
     citationIntegrityRate: citationIntegrity.rate,
     missingCitationIds: citationIntegrity.missingCitationIds,
+    // V0.2
+    briefStaleDetected: briefIsStale(state),
   };
 }
