@@ -18,6 +18,7 @@ function event(
 
 function baseWorkspace(): WorkspaceState {
   return {
+    schemaVersion: 2,
     task: {
       id: "task-1",
       title: "EU industrial policy and Chinese investment",
@@ -35,6 +36,10 @@ function baseWorkspace(): WorkspaceState {
         summary: "EU policy aims to expand clean technology manufacturing.",
         addedBy: "system",
         createdAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedAt: "2026-06-15T00:00:00.000Z",
+        createdBy: "system",
+        updatedBy: "system",
       },
     ],
     evidence: [
@@ -46,6 +51,10 @@ function baseWorkspace(): WorkspaceState {
         relevance: "Shows localization pressure.",
         addedBy: "system",
         createdAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedAt: "2026-06-15T00:00:00.000Z",
+        createdBy: "system",
+        updatedBy: "system",
       },
     ],
     notes: [],
@@ -61,6 +70,8 @@ function baseWorkspace(): WorkspaceState {
         createdBy: "agent",
         createdAt: "2026-06-15T00:00:00.000Z",
         updatedAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedBy: "agent",
         humanDecisionNote: "Final after human review.",
       },
     ],
@@ -68,6 +79,9 @@ function baseWorkspace(): WorkspaceState {
       markdown: "Final brief cites [claim-1] and [evidence-1].",
       updatedBy: "human",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      createdAt: "2026-06-15T00:00:00.000Z",
+      createdBy: "system",
     },
     events: [
       event("event-0001", {
@@ -89,6 +103,16 @@ function baseWorkspace(): WorkspaceState {
       }),
     ],
     agentStatus: "completed",
+    agentControl: {
+      status: "completed",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "mock",
+    },
+    humanMessages: [],
     completed: true,
   };
 }
@@ -186,6 +210,8 @@ describe("runEvaluation", () => {
       createdBy: "agent",
       createdAt: "2026-06-15T00:00:00.000Z",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      updatedBy: "agent",
     });
     workspace.claims.push({
       id: "claim-3",
@@ -198,6 +224,8 @@ describe("runEvaluation", () => {
       createdBy: "agent",
       createdAt: "2026-06-15T00:00:00.000Z",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      updatedBy: "agent",
     });
     workspace.events.push(
       event("event-0003", {
@@ -269,5 +297,183 @@ describe("runEvaluation", () => {
     const summary = runEvaluation(workspace);
 
     expect(summary.process.unauthorizedActionCount).toBe(1);
+  });
+
+  // ── V0.2 metrics ────────────────────────────────────────────────────
+
+  it("counts STALE_OBJECT_VERSION rejections", () => {
+    const workspace = baseWorkspace();
+    workspace.events.push(
+      event("event-0003", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        rejectionCode: "STALE_OBJECT_VERSION",
+        summary: "Expected v1 got v2.",
+      }),
+      event("event-0004", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        rejectionCode: "STALE_OBJECT_VERSION",
+        summary: "Expected v2 got v3.",
+      }),
+      event("event-0005", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        rejectionCode: "PERMISSION_DENIED",
+        summary: "Agent cannot finalize.",
+      }),
+    );
+
+    const summary = runEvaluation(workspace);
+    expect(summary.process.staleWriteRejectionCount).toBe(2);
+  });
+
+  it("counts human message ack rate", () => {
+    const workspace = baseWorkspace();
+    const msgEvent = event("event-0003", {
+      actor: "human",
+      actionType: "SEND_TEAMMATE_MESSAGE",
+      objectType: "human_message",
+      objectId: "human-message-0001",
+    });
+    workspace.events.push(msgEvent);
+    workspace.agentControl.acknowledgedHumanEventIds = [msgEvent.id];
+
+    const summary = runEvaluation(workspace);
+    expect(summary.process.humanMessageCount).toBe(1);
+    expect(summary.process.acknowledgedHumanMessageCount).toBe(1);
+    expect(summary.process.humanMessageAckRate).toBe(1);
+  });
+
+  it("detects stale Brief in outcome", () => {
+    const workspace = baseWorkspace();
+    // Set derivation with a claim version that doesn't match current
+    workspace.brief.derivation = {
+      claimVersions: { "claim-1": 99 },
+      evidenceVersions: {},
+      generatedFromEventIds: [],
+      generatedAt: "2026-06-15T00:00:00.000Z",
+      generatedBy: "agent",
+    };
+    // claim-1 is at version 1 (in baseWorkspace), derivation says 99 → stale
+
+    const summary = runEvaluation(workspace);
+    expect(summary.outcome.briefStaleDetected).toBe(true);
+  });
+
+  it("counts agent accepted action rate", () => {
+    const workspace = baseWorkspace();
+    // baseWorkspace already has 2 events (PROPOSE_CLAIM + UPDATE_CLAIM)
+    // Add one accepted + one rejected agent action
+    workspace.events.push(
+      event("event-0003", {
+        actor: "agent",
+        actionType: "ADD_NOTE",
+        objectType: "note",
+        objectId: "note-1",
+      }),
+      event("event-0004", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        rejectionCode: "PERMISSION_DENIED",
+      }),
+    );
+
+    const summary = runEvaluation(workspace);
+    // Accepted: PROPOSE_CLAIM + ADD_NOTE = 2; Rejected: 1; Total = 3
+    expect(summary.process.acceptedAgentActionCount).toBe(2);
+    expect(summary.process.totalAgentApplyResults).toBe(3);
+    expect(summary.process.acceptedAgentActionRate).toBeCloseTo(2 / 3);
+  });
+
+  it("counts source location completeness for agent evidence", () => {
+    const workspace = baseWorkspace();
+    // Add agent evidence with sourceVersion and valid line range
+    workspace.evidence.push({
+      id: "evidence-2",
+      sourceId: "source-1",
+      quoteOrFinding: "With location.",
+      relevance: "Test.",
+      addedBy: "agent",
+      createdAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      updatedAt: "2026-06-15T00:00:00.000Z",
+      createdBy: "agent",
+      updatedBy: "agent",
+      sourceVersion: 1,
+      sourceContentHash: "abc123",
+      startLine: 2,
+      endLine: 5,
+    });
+
+    const summary = runEvaluation(workspace);
+    expect(summary.traceability.totalAgentExtractedEvidence).toBe(1);
+    expect(summary.traceability.evidenceWithSourceVersionCount).toBe(1);
+    expect(summary.traceability.evidenceWithSourceHashCount).toBe(1);
+    expect(summary.traceability.evidenceWithValidLineRange).toBe(1);
+    expect(summary.traceability.sourceLocationCompletenessRate).toBe(1);
+  });
+
+  it("reports V0.2 collaboration risk metrics", () => {
+    const workspace = baseWorkspace();
+    workspace.messages = [
+      {
+        id: "human-message-1",
+        actor: "human",
+        content: "Please consider route mix.",
+        relatedObjectIds: ["claim-1"],
+        createdAt: "2026-06-15T00:00:00.000Z",
+        status: "pending",
+      },
+      {
+        id: "agent-message-1",
+        actor: "agent",
+        content: "I will update the claim.",
+        relatedObjectIds: ["claim-1"],
+        createdAt: "2026-06-15T00:01:00.000Z",
+        status: "resolved",
+        inReplyToMessageId: "human-message-1",
+      },
+    ];
+    workspace.events.push(
+      event("event-0003", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        objectType: "brief",
+        objectId: "brief",
+        expectedVersion: 1,
+        rejectionCode: "STALE_OBJECT_VERSION",
+      }),
+      event("event-0004", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        objectType: "brief",
+        objectId: "brief",
+        expectedVersion: 1,
+        rejectionCode: "STALE_OBJECT_VERSION",
+      }),
+      event("event-0005", {
+        actor: "human",
+        actionType: "UPDATE_CLAIM",
+        objectType: "claim",
+        objectId: "claim-1",
+        changes: [{ field: "status", before: "ai_proposed", after: "human_revised" }],
+      }),
+      event("event-0006", {
+        actor: "agent",
+        actionType: "ACTION_REJECTED",
+        objectType: "source",
+        objectId: "source-1",
+        rejectionCode: "DUPLICATE_SOURCE",
+      }),
+    );
+
+    const summary = runEvaluation(workspace);
+
+    expect(summary.process.repeatedStaleWriteCount).toBe(1);
+    expect(summary.process.duplicateSourceCount).toBe(1);
+    expect(summary.process.messageResolutionRate).toBe(0);
+    expect(summary.process.agentReplyWithoutActionCount).toBe(1);
+    expect(summary.process.unresolvedHumanRevisionCount).toBe(1);
   });
 });

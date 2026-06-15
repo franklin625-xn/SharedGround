@@ -6,7 +6,16 @@ import type {
   WorkspaceState,
 } from "@/core/types";
 
-const DEMO_EVIDENCE: (Omit<Evidence, "id" | "createdAt">)[] = [
+function simpleHash(content: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < content.length; i++) {
+    h ^= content.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+const DEMO_EVIDENCE: (Omit<Evidence, "id" | "createdAt" | "version" | "updatedAt" | "createdBy" | "updatedBy">)[] = [
   {
     sourceId: "demo-source-001",
     quoteOrFinding:
@@ -51,9 +60,27 @@ export function createDemoWorkspaceState(): WorkspaceState {
     ...e,
     id: `demo-evidence-${(index + 1).toString().padStart(3, "0")}`,
     createdAt: now,
+    version: 1,
+    updatedAt: now,
+    createdBy: "system" as const,
+    updatedBy: "system" as const,
   }));
 
+  // Enrich demo sources with V0.2 version metadata and content
+  const sources: Source[] = demoSources.map((s) => ({
+    ...s,
+    version: 1,
+    updatedAt: (s as Record<string, unknown>).updatedAt as string ?? now,
+    createdBy: ((s as Record<string, unknown>).createdBy as string) ?? s.addedBy ?? "system",
+    updatedBy: ((s as Record<string, unknown>).updatedBy as string) ?? s.addedBy ?? "system",
+    content: s.summary,
+    contentHash: s.summary ? simpleHash(s.summary) : undefined,
+    lineCount: s.summary ? s.summary.split("\n").length : undefined,
+    mediaType: "demo" as const,
+  })) as Source[];
+
   return {
+    schemaVersion: 2,
     task: {
       id: demoTask.id,
       title: demoTask.title,
@@ -62,7 +89,7 @@ export function createDemoWorkspaceState(): WorkspaceState {
       sourceMode: demoTask.sourceMode as "demo_corpus" | "live_search",
       createdAt: demoTask.createdAt,
     },
-    sources: [...demoSources] as Source[],
+    sources,
     evidence,
     notes: [],
     claims: [],
@@ -70,9 +97,22 @@ export function createDemoWorkspaceState(): WorkspaceState {
       markdown: "",
       updatedBy: "system",
       updatedAt: now,
+      version: 1,
+      createdAt: now,
+      createdBy: "system",
     },
     events: [],
     agentStatus: "idle",
+    agentControl: {
+      status: "idle",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "idle",
+    },
+    humanMessages: [],
     completed: false,
   };
 }
@@ -92,6 +132,7 @@ export function createEmptyWorkspaceState(params: {
   const now = new Date().toISOString();
 
   return {
+    schemaVersion: 2,
     task: {
       id: `task-${Date.now()}`,
       title: params.title,
@@ -108,9 +149,22 @@ export function createEmptyWorkspaceState(params: {
       markdown: "",
       updatedBy: "system",
       updatedAt: now,
+      version: 1,
+      createdAt: now,
+      createdBy: "system",
     },
     events: [],
     agentStatus: "idle",
+    agentControl: {
+      status: "idle",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "idle",
+    },
+    humanMessages: [],
     completed: false,
   };
 }

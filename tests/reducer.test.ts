@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetEventCounterForTests } from "@/core/event-factory";
-import { applyWorkspaceAction } from "@/core/reducer";
+import { applyWorkspaceAction, applyWorkspaceActionWithResult } from "@/core/reducer";
 import type { WorkspaceAction } from "@/core/schemas";
 import { resetObjectCounterForTests } from "@/core/reducer";
 import type { WorkspaceState } from "@/core/types";
 
 function createState(): WorkspaceState {
   return {
+    schemaVersion: 2,
     task: {
       id: "task-1",
       title: "EU industrial policy and Chinese investment",
@@ -25,6 +26,10 @@ function createState(): WorkspaceState {
           "EU policy aims to expand clean technology manufacturing capacity.",
         addedBy: "system",
         createdAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedAt: "2026-06-15T00:00:00.000Z",
+        createdBy: "system",
+        updatedBy: "system",
       },
     ],
     evidence: [
@@ -36,6 +41,10 @@ function createState(): WorkspaceState {
         relevance: "Shows localization pressure.",
         addedBy: "system",
         createdAt: "2026-06-15T00:00:00.000Z",
+        version: 1,
+        updatedAt: "2026-06-15T00:00:00.000Z",
+        createdBy: "system",
+        updatedBy: "system",
       },
     ],
     notes: [],
@@ -44,9 +53,22 @@ function createState(): WorkspaceState {
       markdown: "",
       updatedBy: "system",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      createdAt: "2026-06-15T00:00:00.000Z",
+      createdBy: "system",
     },
     events: [],
     agentStatus: "idle",
+    agentControl: {
+      status: "idle",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "idle",
+    },
+    humanMessages: [],
     completed: false,
   };
 }
@@ -301,7 +323,7 @@ describe("applyWorkspaceAction", () => {
     });
   });
 
-  it("lets a human edit a source and writes before/after in a source-scoped event", () => {
+  it("lets a human edit a source and writes scalar changes in a source-scoped event", () => {
     const next = applyWorkspaceAction(
       createState(),
       {
@@ -334,17 +356,27 @@ describe("applyWorkspaceAction", () => {
       objectId: "source-1",
       reason: "Human corrected source metadata.",
     });
-    expect(next.events.at(-1)?.before).toMatchObject({
-      title: "Net-Zero Industry Act",
-      publisher: "European Commission",
-    });
-    expect(next.events.at(-1)?.after).toMatchObject({
-      title: "Updated Net-Zero Industry Act",
-      publisher: "Updated Commission",
-    });
+    expect(next.events.at(-1)?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "title",
+          before: "Net-Zero Industry Act",
+          after: "Updated Net-Zero Industry Act",
+        }),
+        expect.objectContaining({
+          field: "publisher",
+          before: "European Commission",
+          after: "Updated Commission",
+        }),
+      ]),
+    );
+    expect(next.events.at(-1)?.before).toBeUndefined();
+    expect(next.events.at(-1)?.after).toBeUndefined();
+    expect(next.events.at(-1)?.legacyBefore).toBeUndefined();
+    expect(next.events.at(-1)?.legacyAfter).toBeUndefined();
   });
 
-  it("lets a human edit evidence and writes before/after in an evidence-scoped event", () => {
+  it("lets a human edit evidence and writes scalar changes in an evidence-scoped event", () => {
     const next = applyWorkspaceAction(
       createState(),
       {
@@ -371,15 +403,24 @@ describe("applyWorkspaceAction", () => {
       objectId: "evidence-1",
       reason: "Human corrected evidence wording.",
     });
-    expect(next.events.at(-1)?.before).toMatchObject({
-      quoteOrFinding:
-        "The EU links public support to local manufacturing capacity.",
-      relevance: "Shows localization pressure.",
-    });
-    expect(next.events.at(-1)?.after).toMatchObject({
-      quoteOrFinding: "Updated evidence finding.",
-      relevance: "Updated relevance.",
-    });
+    expect(next.events.at(-1)?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "quoteOrFinding",
+          before: "The EU links public support to local manufacturing capacity.",
+          after: "Updated evidence finding.",
+        }),
+        expect.objectContaining({
+          field: "relevance",
+          before: "Shows localization pressure.",
+          after: "Updated relevance.",
+        }),
+      ]),
+    );
+    expect(next.events.at(-1)?.before).toBeUndefined();
+    expect(next.events.at(-1)?.after).toBeUndefined();
+    expect(next.events.at(-1)?.legacyBefore).toBeUndefined();
+    expect(next.events.at(-1)?.legacyAfter).toBeUndefined();
   });
 
   it("lets a human mark a claim evidence insufficient and finalize it with claim-scoped events", () => {
@@ -854,5 +895,1076 @@ describe("applyWorkspaceAction", () => {
 
     // Should be evidence-0002 (evidence-1 already exists)
     expect(s2.evidence[1]?.id).toBe("evidence-0002");
+  });
+
+  // ── Phase 1: version metadata tests ──────────────────────────────────
+
+  it("new objects start at version 1", () => {
+    const next = applyWorkspaceAction(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "New Source",
+          publisher: "Test",
+          summary: "Test.",
+        },
+      },
+      "agent",
+    );
+
+    expect(next.sources[1]?.version).toBe(1);
+    expect(next.sources[1]?.createdBy).toBe("agent");
+    expect(next.sources[1]?.updatedBy).toBe("agent");
+    expect(next.sources[1]?.createdAt).toBeTruthy();
+    expect(next.sources[1]?.updatedAt).toBeTruthy();
+  });
+
+  it("updates increment version on existing objects", () => {
+    const withSource = applyWorkspaceAction(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "V1 Source",
+          publisher: "Test",
+          summary: "First.",
+        },
+      },
+      "agent",
+    );
+
+    expect(withSource.sources[1]?.version).toBe(1);
+
+    const edited = applyWorkspaceAction(
+      withSource,
+      {
+        type: "EDIT_SOURCE",
+        payload: {
+          sourceId: withSource.sources[1]!.id,
+          title: "V2 Source",
+          publisher: "Updated",
+          summary: "Second.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    expect(edited.sources[1]?.version).toBe(2);
+    expect(edited.sources[1]?.updatedBy).toBe("agent");
+  });
+
+  it("event carries objectVersionBefore and objectVersionAfter on updates", () => {
+    const withSource = applyWorkspaceAction(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "V1 Source",
+          publisher: "Test",
+          summary: "First.",
+        },
+      },
+      "agent",
+    );
+
+    const edited = applyWorkspaceAction(
+      withSource,
+      {
+        type: "EDIT_SOURCE",
+        payload: {
+          sourceId: withSource.sources[1]!.id,
+          title: "V2 Source",
+          publisher: "Updated",
+          summary: "Second.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    const lastEvent = edited.events.at(-1);
+    expect(lastEvent?.objectVersionBefore).toBe(1);
+    expect(lastEvent?.objectVersionAfter).toBe(2);
+  });
+
+  it("event carries changes (scalar diff) instead of full objects", () => {
+    const withSource = applyWorkspaceAction(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "V1 Source",
+          publisher: "Test",
+          summary: "First.",
+        },
+      },
+      "agent",
+    );
+
+    const edited = applyWorkspaceAction(
+      withSource,
+      {
+        type: "EDIT_SOURCE",
+        payload: {
+          sourceId: withSource.sources[1]!.id,
+          title: "V2 Source",
+          publisher: "Updated",
+          summary: "Second.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    const lastEvent = edited.events.at(-1);
+    expect(lastEvent?.changes).toBeDefined();
+    expect(lastEvent?.changes).toHaveLength(3); // title, publisher, summary
+    expect(lastEvent?.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "title", before: "V1 Source", after: "V2 Source" }),
+        expect.objectContaining({ field: "publisher", before: "Test", after: "Updated" }),
+        expect.objectContaining({ field: "summary", before: "First.", after: "Second." }),
+      ]),
+    );
+    expect(lastEvent?.before).toBeUndefined();
+    expect(lastEvent?.after).toBeUndefined();
+    expect(lastEvent?.legacyBefore).toBeUndefined();
+    expect(lastEvent?.legacyAfter).toBeUndefined();
+  });
+
+  it("events never contain full before/after state snapshots", () => {
+    const next = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    const event = next.events[0]!;
+    // 'before' should not be the full WorkspaceState (should be undefined for ADD)
+    // and changes should be present
+    expect(event.objectVersionAfter).toBe(1);
+    expect(event.before).toBeUndefined();
+    expect(event.after).toBeUndefined();
+    expect(event.legacyBefore).toBeUndefined();
+    expect(event.legacyAfter).toBeUndefined();
+  });
+
+  it("ACTION_REJECTED stores a small rejected action snapshot instead of WorkspaceState", () => {
+    const state = createState();
+    const next = applyWorkspaceAction(
+      state,
+      {
+        type: "UPDATE_CLAIM",
+        payload: { claimId: "missing-claim", status: "final" },
+        reason: "Agent tries to finalize missing claim.",
+      },
+      "agent",
+    );
+
+    const event = next.events.at(-1)!;
+    expect(event.actionType).toBe("ACTION_REJECTED");
+    expect(event.before).toBeUndefined();
+    expect(event.after).toBeUndefined();
+    expect(event.legacyBefore).toBeUndefined();
+    expect(event.legacyAfter).toBeUndefined();
+    expect(JSON.stringify(event)).not.toContain('"events"');
+    expect(JSON.stringify(event).length).toBeLessThan(1200);
+  });
+
+  it("100 rejected actions grow event JSON approximately linearly", () => {
+    let state = createState();
+    const sizes: number[] = [];
+
+    for (let i = 0; i < 100; i++) {
+      state = applyWorkspaceAction(
+        state,
+        {
+          type: "EDIT_BRIEF",
+          payload: {
+            markdown: `stale ${i}`,
+            expectedVersion: 999,
+            derivation: {
+              claimVersions: {},
+              evidenceVersions: {},
+              generatedFromEventIds: [],
+            },
+          },
+          reason: "Force stale rejection.",
+        },
+        "agent",
+      );
+      sizes.push(JSON.stringify(state.events).length);
+    }
+
+    const firstTenDelta = sizes[9]! - sizes[0]!;
+    const lastTenDelta = sizes[99]! - sizes[90]!;
+    expect(lastTenDelta).toBeLessThan(firstTenDelta * 2);
+    expect(JSON.stringify(state.events)).not.toContain('"events":');
+  });
+
+  it("schema version is 2 on all reducer outputs", () => {
+    const next = applyWorkspaceAction(
+      createState(),
+      {
+        type: "WAIT",
+        payload: { waitingFor: "Test." },
+      },
+      "agent",
+    );
+    expect(next.schemaVersion).toBe(2);
+  });
+});
+
+// ── Phase 2: applyWorkspaceActionWithResult ────────────────────────────
+
+describe("applyWorkspaceActionWithResult", () => {
+  beforeEach(() => {
+    resetEventCounterForTests();
+    resetObjectCounterForTests();
+  });
+
+  it("returns accepted result with actionId, eventId, and version metadata", () => {
+    const { state, result } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: { title: "Test", publisher: "Pub", summary: "Sum." },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.actionId).toMatch(/^action-/);
+    expect(result.eventId).toMatch(/^event-/);
+    expect(result.objectType).toBe("source");
+    expect(result.objectId).toBe(state.sources[1]!.id);
+    expect(result.afterVersion).toBe(1);
+    expect(result.rejectionCode).toBeUndefined();
+  });
+
+  it("rejects Agent UPDATE_CLAIM with STALE_OBJECT_VERSION when expectedVersion mismatches", () => {
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    // First human edit pushes version to 2
+    const edited = applyWorkspaceAction(
+      withClaim,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: withClaim.claims[0]!.id,
+          status: "human_revised",
+          humanDecisionNote: "Revised.",
+        },
+      },
+      "human",
+    );
+    expect(edited.claims[0]!.version).toBe(2);
+
+    // Agent tries to update with stale expectedVersion=1
+    const { state, result } = applyWorkspaceActionWithResult(
+      edited,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: edited.claims[0]!.id,
+          statement: "Stale update.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("STALE_OBJECT_VERSION");
+    expect(result.beforeVersion).toBe(2);
+    expect(result.expectedVersion).toBe(1);
+    // State unchanged except for rejection event
+    expect(state.claims[0]!.version).toBe(2);
+    expect(state.claims[0]!.statement).toBe("Test.");
+    expect(state.events.at(-1)!.rejectionCode).toBe("STALE_OBJECT_VERSION");
+  });
+
+  it("rejects Agent existing-object updates when expectedVersion is missing", () => {
+    const withNote = applyWorkspaceAction(
+      createState(),
+      {
+        type: "ADD_NOTE",
+        payload: {
+          content: "Initial note.",
+          sourceIds: ["source-1"],
+          evidenceIds: ["evidence-1"],
+        },
+      },
+      "human",
+    );
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test claim.",
+          reasoning: "Test reasoning.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    const cases: Array<{
+      name: string;
+      state: WorkspaceState;
+      action: WorkspaceAction;
+      objectId: string;
+    }> = [
+      {
+        name: "EDIT_SOURCE",
+        state: createState(),
+        objectId: "source-1",
+        action: {
+          type: "EDIT_SOURCE",
+          payload: {
+            sourceId: "source-1",
+            title: "Edited source",
+            publisher: "Edited publisher",
+            summary: "Edited summary.",
+          },
+        },
+      },
+      {
+        name: "EDIT_EVIDENCE",
+        state: createState(),
+        objectId: "evidence-1",
+        action: {
+          type: "EDIT_EVIDENCE",
+          payload: {
+            evidenceId: "evidence-1",
+            quoteOrFinding: "Edited evidence.",
+            relevance: "Edited relevance.",
+          },
+        },
+      },
+      {
+        name: "EDIT_NOTE",
+        state: withNote,
+        objectId: withNote.notes[0]!.id,
+        action: {
+          type: "EDIT_NOTE",
+          payload: {
+            noteId: withNote.notes[0]!.id,
+            content: "Edited note.",
+            sourceIds: ["source-1"],
+            evidenceIds: ["evidence-1"],
+          },
+        },
+      },
+      {
+        name: "UPDATE_CLAIM",
+        state: withClaim,
+        objectId: withClaim.claims[0]!.id,
+        action: {
+          type: "UPDATE_CLAIM",
+          payload: {
+            claimId: withClaim.claims[0]!.id,
+            statement: "Edited claim.",
+          },
+        },
+      },
+      {
+        name: "CHALLENGE_CLAIM",
+        state: withClaim,
+        objectId: withClaim.claims[0]!.id,
+        action: {
+          type: "CHALLENGE_CLAIM",
+          payload: {
+            claimId: withClaim.claims[0]!.id,
+            counterEvidenceIds: ["evidence-1"],
+            note: "Challenge note.",
+          },
+        },
+      },
+      {
+        name: "EDIT_BRIEF",
+        state: createState(),
+        objectId: "brief",
+        action: {
+          type: "EDIT_BRIEF",
+          payload: {
+            markdown: "Draft brief.",
+            derivation: {
+              claimVersions: {},
+              evidenceVersions: {},
+              generatedFromEventIds: [],
+            },
+          },
+        },
+      },
+    ];
+
+    for (const item of cases) {
+      const { state, result } = applyWorkspaceActionWithResult(
+        item.state,
+        item.action,
+        "agent",
+      );
+
+      expect(result.accepted, item.name).toBe(false);
+      expect(result.rejectionCode, item.name).toBe("INVALID_ACTION");
+      expect(result.objectId, item.name).toBe(item.objectId);
+      expect(state.events.at(-1)?.actionType, item.name).toBe("ACTION_REJECTED");
+      expect(state.events.at(-1)?.rejectionCode, item.name).toBe("INVALID_ACTION");
+    }
+  });
+
+  it("rejects Agent EDIT_EVIDENCE with STALE_OBJECT_VERSION when stale", () => {
+    const base = createState();
+
+    const edited = applyWorkspaceAction(
+      base,
+      {
+        type: "EDIT_EVIDENCE",
+        payload: {
+          evidenceId: "evidence-1",
+          quoteOrFinding: "Updated.",
+          relevance: "Updated.",
+        },
+      },
+      "human",
+    );
+    expect(edited.evidence[0]!.version).toBe(2);
+
+    const { result } = applyWorkspaceActionWithResult(
+      edited,
+      {
+        type: "EDIT_EVIDENCE",
+        payload: {
+          evidenceId: "evidence-1",
+          quoteOrFinding: "Stale.",
+          relevance: "Stale.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("STALE_OBJECT_VERSION");
+  });
+
+  it("allows Human update without expectedVersion", () => {
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    // Human updates without expectedVersion — always succeeds
+    const { state, result } = applyWorkspaceActionWithResult(
+      withClaim,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: withClaim.claims[0]!.id,
+          status: "human_confirmed",
+          humanDecisionNote: "Confirmed.",
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(state.claims[0]!.version).toBe(2);
+    expect(state.claims[0]!.status).toBe("human_confirmed");
+  });
+
+  it("allows Human update even with mismatched expectedVersion (Human wins)", () => {
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    // Human updates, claim v1 → v2
+    const edited = applyWorkspaceAction(
+      withClaim,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: withClaim.claims[0]!.id,
+          status: "human_revised",
+          humanDecisionNote: "V2.",
+        },
+      },
+      "human",
+    );
+
+    // Human sends stale expectedVersion=1, but still succeeds
+    const { result } = applyWorkspaceActionWithResult(
+      edited,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: edited.claims[0]!.id,
+          statement: "Human always wins.",
+          expectedVersion: 1,
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(true);
+  });
+
+  it("rejects Agent regressing a human-reviewed claim back to ai_proposed", () => {
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    const reviewed = applyWorkspaceAction(
+      withClaim,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: withClaim.claims[0]!.id,
+          status: "human_confirmed",
+          humanDecisionNote: "Looks good.",
+        },
+      },
+      "human",
+    );
+    expect(reviewed.claims[0]!.status).toBe("human_confirmed");
+
+    // Agent tries to regress to ai_proposed
+    const { state, result } = applyWorkspaceActionWithResult(
+      reviewed,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: reviewed.claims[0]!.id,
+          status: "ai_proposed",
+          expectedVersion: reviewed.claims[0]!.version,
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("AGENT_STATE_REGRESSION");
+    expect(state.claims[0]!.status).toBe("human_confirmed");
+    expect(state.events.at(-1)!.rejectionCode).toBe("AGENT_STATE_REGRESSION");
+  });
+
+  it("sets accepted=true and includes correct beforeVersion/afterVersion for successful Agent update", () => {
+    const withClaim = applyWorkspaceAction(
+      createState(),
+      {
+        type: "PROPOSE_CLAIM",
+        payload: {
+          statement: "Test.",
+          reasoning: "Test.",
+          supportingEvidenceIds: ["evidence-1"],
+          counterEvidenceIds: [],
+        },
+      },
+      "agent",
+    );
+
+    const { result } = applyWorkspaceActionWithResult(
+      withClaim,
+      {
+        type: "UPDATE_CLAIM",
+        payload: {
+          claimId: withClaim.claims[0]!.id,
+          reasoning: "Updated reasoning.",
+          expectedVersion: 1,
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.beforeVersion).toBe(1);
+    expect(result.afterVersion).toBe(2);
+    expect(result.expectedVersion).toBe(1);
+    expect(result.rejectionCode).toBeUndefined();
+  });
+});
+
+// ── Phase 3: Markdown Sources & Evidence Location ──────────────────────
+
+describe("Phase 3 — Markdown Sources & Evidence", () => {
+  beforeEach(() => {
+    resetEventCounterForTests();
+    resetObjectCounterForTests();
+  });
+
+  it("ADD_SOURCE with Markdown content computes contentHash and lineCount", () => {
+    const content = "# Title\n\nParagraph one.\n\nParagraph two.";
+    const { state } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Test Markdown",
+          publisher: "Uploaded",
+          summary: "Test.",
+          fileName: "test.md",
+          mediaType: "markdown",
+          content,
+        },
+      },
+      "human",
+    );
+
+    const src = state.sources[1]!;
+    expect(src.content).toBe(content);
+    expect(src.contentHash).toBeTruthy();
+    expect(src.contentHash).toHaveLength(8);
+    expect(src.lineCount).toBe(5);
+    expect(src.mediaType).toBe("markdown");
+    expect(src.fileName).toBe("test.md");
+  });
+
+  it("ADD_SOURCE without content omits hash and lineCount", () => {
+    const { state } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: { title: "No Content", publisher: "X", summary: "Y." },
+      },
+      "human",
+    );
+
+    const src = state.sources[1]!;
+    expect(src.content).toBeUndefined();
+    expect(src.contentHash).toBeUndefined();
+    expect(src.lineCount).toBeUndefined();
+    expect(src.mediaType).toBe("demo");
+  });
+
+  it("events never include Source.content or full objects in before/after", () => {
+    const { state } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Secret Doc",
+          publisher: "Uploaded",
+          summary: "Confidential.",
+          content: "TOP SECRET CONTENT HERE",
+        },
+      },
+      "human",
+    );
+
+    const event = state.events.at(-1)!;
+    expect(event.before).toBeUndefined();
+    expect(event.after).toBeUndefined();
+    expect(event.legacyBefore).toBeUndefined();
+    expect(event.legacyAfter).toBeUndefined();
+    // The source in state still has the content
+    expect(state.sources[1]!.content).toBe("TOP SECRET CONTENT HERE");
+  });
+
+  it("skips duplicate Markdown contentHash without creating a second source", () => {
+    const content = "# Same\n\nBody";
+    const { state: first } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "First Upload",
+          publisher: "Uploaded",
+          summary: "First.",
+          fileName: "same.md",
+          mediaType: "markdown",
+          content,
+        },
+      },
+      "human",
+    );
+    const sourceCount = first.sources.length;
+
+    const { state: second, result } = applyWorkspaceActionWithResult(
+      first,
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Duplicate Upload",
+          publisher: "Uploaded",
+          summary: "Duplicate.",
+          fileName: "same-copy.md",
+          mediaType: "markdown",
+          content,
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("DUPLICATE_SOURCE");
+    expect(second.sources).toHaveLength(sourceCount);
+    expect(second.events.at(-1)).toMatchObject({
+      actionType: "ACTION_REJECTED",
+      objectType: "source",
+      rejectionCode: "DUPLICATE_SOURCE",
+    });
+    expect(JSON.stringify(second.events.at(-1))).not.toContain(content);
+  });
+
+  it("rejects ADD_EVIDENCE with mismatched startLine/endLine (one missing)", () => {
+    const { state, result } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_EVIDENCE",
+        payload: {
+          sourceId: "source-1",
+          quoteOrFinding: "Test.",
+          relevance: "Test.",
+          startLine: 1,
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("LINE_RANGE_INVALID");
+    expect(state.evidence).toHaveLength(1); // unchanged
+  });
+
+  it("rejects ADD_EVIDENCE with startLine > endLine", () => {
+    const { result } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_EVIDENCE",
+        payload: {
+          sourceId: "source-1",
+          quoteOrFinding: "Test.",
+          relevance: "Test.",
+          startLine: 5,
+          endLine: 3,
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("LINE_RANGE_INVALID");
+  });
+
+  it("accepts ADD_EVIDENCE with valid line range and snaps sourceVersion/sourceContentHash", () => {
+    // First add a source with content
+    const { state: withSrc } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Lines",
+          publisher: "Test",
+          summary: "Test.",
+          content: "line1\nline2\nline3\nline4\nline5",
+        },
+      },
+      "human",
+    );
+    const src = withSrc.sources[1]!;
+
+    const { state, result } = applyWorkspaceActionWithResult(
+      withSrc,
+      {
+        type: "ADD_EVIDENCE",
+        payload: {
+          sourceId: src.id,
+          quoteOrFinding: "From lines 2-3.",
+          relevance: "Test.",
+          startLine: 2,
+          endLine: 3,
+          section: "Body",
+          polarity: "supporting",
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(true);
+    const ev = state.evidence.at(-1)!;
+    expect(ev.sourceVersion).toBe(src.version);
+    expect(ev.sourceContentHash).toBe(src.contentHash);
+    expect(ev.startLine).toBe(2);
+    expect(ev.endLine).toBe(3);
+    expect(ev.section).toBe("Body");
+    expect(ev.polarity).toBe("supporting");
+  });
+
+  it("rejects EDIT_EVIDENCE with endLine exceeding source lineCount", () => {
+    const { state: withSrc } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Short",
+          publisher: "Test",
+          summary: "Test.",
+          content: "only 2 lines\nthat's it",
+        },
+      },
+      "human",
+    );
+    const srcId = withSrc.sources[1]!.id;
+
+    const { state: withEv } = applyWorkspaceActionWithResult(
+      withSrc,
+      {
+        type: "ADD_EVIDENCE",
+        payload: {
+          sourceId: srcId,
+          quoteOrFinding: "Test.",
+          relevance: "Test.",
+        },
+      },
+      "human",
+    );
+
+    const { result } = applyWorkspaceActionWithResult(
+      withEv,
+      {
+        type: "EDIT_EVIDENCE",
+        payload: {
+          evidenceId: withEv.evidence.at(-1)!.id,
+          quoteOrFinding: "Out of range.",
+          relevance: "Test.",
+          startLine: 1,
+          endLine: 99,
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("LINE_RANGE_INVALID");
+  });
+});
+
+// ── Phase 5: Human Messages & Acknowledgement ───────────────────────
+
+describe("Phase 5 — Human Messages & Acknowledgement", () => {
+  beforeEach(() => {
+    resetEventCounterForTests();
+    resetObjectCounterForTests();
+  });
+
+  it("SEND_TEAMMATE_MESSAGE creates pending message object and slim event", () => {
+    const { state, result } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "SEND_TEAMMATE_MESSAGE",
+        payload: {
+          content: "Focus on EV batteries please.",
+          relatedObjectIds: [],
+        },
+      },
+      "human",
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.objectType).toBe("human_message");
+    expect(state.messages!).toHaveLength(1);
+    expect(state.messages![0]).toMatchObject({
+      actor: "human",
+      content: "Focus on EV batteries please.",
+      status: "pending",
+      relatedObjectIds: [],
+    });
+
+    // Event stores summary, not full content duplicate
+    const event = state.events.find(
+      (e) => e.objectType === "human_message",
+    );
+    expect(event).toBeDefined();
+    expect(event!.summary).toBe("Human sent a teammate message.");
+    expect(JSON.stringify(event)).not.toContain("Focus on EV batteries please.");
+  });
+
+  it("REPLY_TEAMMATE_MESSAGE creates agent reply and marks the human message read", () => {
+    const { state: withMessage } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "SEND_TEAMMATE_MESSAGE",
+        payload: {
+          content: "Consider BF-BOF and scrap-EAF route shares.",
+          relatedObjectIds: ["evidence-1"],
+        },
+      },
+      "human",
+    );
+    const messageId = withMessage.messages![0]!.id;
+
+    const { state, result } = applyWorkspaceActionWithResult(
+      withMessage,
+      {
+        type: "REPLY_TEAMMATE_MESSAGE",
+        payload: {
+          content:
+            "I will treat route mix as unresolved and update the claim before touching the brief.",
+          inReplyToMessageId: messageId,
+          relatedObjectIds: ["evidence-1"],
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(state.messages!).toHaveLength(2);
+    expect(state.messages![0]!.status).toBe("read");
+    expect(state.messages![0]!.acknowledgedAt).toBeTruthy();
+    expect(state.messages![1]).toMatchObject({
+      actor: "agent",
+      status: "resolved",
+      inReplyToMessageId: messageId,
+    });
+  });
+
+  it("RESOLVE_TEAMMATE_MESSAGE requires a real successful action id", () => {
+    const { state: withMessage } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "SEND_TEAMMATE_MESSAGE",
+        payload: {
+          content: "Please revise the claim.",
+          relatedObjectIds: [],
+        },
+      },
+      "human",
+    );
+    const messageId = withMessage.messages![0]!.id;
+
+    const { state, result } = applyWorkspaceActionWithResult(
+      withMessage,
+      {
+        type: "RESOLVE_TEAMMATE_MESSAGE",
+        payload: {
+          messageId,
+          resolvedByActionIds: ["missing-action"],
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("INVALID_REFERENCE");
+    expect(state.messages![0]!.status).toBe("pending");
+  });
+
+  it("Agent cannot send SEND_TEAMMATE_MESSAGE", () => {
+    const { result } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "SEND_TEAMMATE_MESSAGE",
+        payload: {
+          content: "Agent shouldn't send this.",
+          relatedObjectIds: [],
+        },
+      },
+      "agent",
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.rejectionCode).toBe("PERMISSION_DENIED");
+  });
+
+  it("unacknowledged Human edits appear in recentHumanChanges context", async () => {
+    const { buildAgentContext } = await import("@/agent/build-context");
+
+    // Human edits evidence
+    const { state: s1 } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "EDIT_EVIDENCE",
+        payload: {
+          evidenceId: "evidence-1",
+          quoteOrFinding: "Human edited this.",
+          relevance: "New relevance.",
+        },
+      },
+      "human",
+    );
+
+    const ctx = buildAgentContext(s1);
+    expect(ctx.recentHumanChanges).toHaveLength(1);
+    expect(ctx.recentHumanChanges[0]!.actionType).toBe("EDIT_EVIDENCE");
+  });
+
+  it("acknowledged Human events are excluded from recentHumanChanges", async () => {
+    const { buildAgentContext } = await import("@/agent/build-context");
+
+    // Human edits evidence
+    const { state: s1 } = applyWorkspaceActionWithResult(
+      createState(),
+      {
+        type: "EDIT_EVIDENCE",
+        payload: {
+          evidenceId: "evidence-1",
+          quoteOrFinding: "Human edited this.",
+          relevance: "New relevance.",
+        },
+      },
+      "human",
+    );
+
+    const humanEventId = s1.events.at(-1)!.id;
+
+    // Mark as acknowledged
+    s1.agentControl.acknowledgedHumanEventIds = [humanEventId];
+
+    const ctx = buildAgentContext(s1);
+    expect(ctx.recentHumanChanges).toHaveLength(0);
   });
 });

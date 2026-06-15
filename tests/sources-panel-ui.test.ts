@@ -11,6 +11,10 @@ const source: Source = {
   summary: "EU policy aims to expand clean technology manufacturing capacity.",
   addedBy: "system",
   createdAt: "2026-06-15T00:00:00.000Z",
+  version: 1,
+  updatedAt: "2026-06-15T00:00:00.000Z",
+  createdBy: "system",
+  updatedBy: "system",
 };
 
 const evidence: Evidence = {
@@ -20,6 +24,10 @@ const evidence: Evidence = {
   relevance: "Shows localization pressure.",
   addedBy: "system",
   createdAt: "2026-06-15T00:00:00.000Z",
+  version: 1,
+  updatedAt: "2026-06-15T00:00:00.000Z",
+  createdBy: "system",
+  updatedBy: "system",
 };
 
 describe("SourcesPanel", () => {

@@ -1,5 +1,7 @@
 import type {
+  ActionRejectionCode,
   Actor,
+  EventChange,
   WorkspaceEvent,
   WorkspaceObjectType,
 } from "@/core/types";
@@ -10,9 +12,23 @@ export type CreateWorkspaceEventInput = {
   objectType?: WorkspaceObjectType;
   objectId?: string;
   summary: string;
-  before?: unknown;
-  after?: unknown;
   reason?: string;
+  // ── V0.2 slim event fields ──
+  actionId?: string;
+  runId?: string;
+  stepId?: string;
+  objectVersionBefore?: number;
+  objectVersionAfter?: number;
+  expectedVersion?: number;
+  changes?: EventChange[];
+  rejectionCode?: ActionRejectionCode;
+  // ── V0.1 compatibility input only. New events never persist these. ──
+  legacyBefore?: unknown;
+  legacyAfter?: unknown;
+  /** @deprecated Use legacyBefore / changes. */
+  before?: unknown;
+  /** @deprecated Use legacyAfter / changes. */
+  after?: unknown;
 };
 
 /**
@@ -30,18 +46,30 @@ export function createWorkspaceEvent(
   input: CreateWorkspaceEventInput,
   existingCount?: number,
 ): WorkspaceEvent {
+  const base = {
+    id: "",
+    timestamp: new Date().toISOString(),
+    actor: input.actor,
+    actionType: input.actionType,
+    objectType: input.objectType,
+    objectId: input.objectId,
+    summary: input.summary,
+    reason: input.reason,
+    // V0.2 slim fields
+    actionId: input.actionId,
+    runId: input.runId,
+    stepId: input.stepId,
+    objectVersionBefore: input.objectVersionBefore,
+    objectVersionAfter: input.objectVersionAfter,
+    expectedVersion: input.expectedVersion,
+    changes: input.changes,
+    rejectionCode: input.rejectionCode,
+  };
+
   if (existingCount !== undefined) {
     return {
+      ...base,
       id: `event-${(existingCount + 1).toString().padStart(4, "0")}`,
-      timestamp: new Date().toISOString(),
-      actor: input.actor,
-      actionType: input.actionType,
-      objectType: input.objectType,
-      objectId: input.objectId,
-      summary: input.summary,
-      before: input.before,
-      after: input.after,
-      reason: input.reason,
     };
   }
 
@@ -49,16 +77,8 @@ export function createWorkspaceEvent(
   eventCounter += 1;
 
   return {
+    ...base,
     id: `event-${eventCounter.toString().padStart(4, "0")}`,
-    timestamp: new Date().toISOString(),
-    actor: input.actor,
-    actionType: input.actionType,
-    objectType: input.objectType,
-    objectId: input.objectId,
-    summary: input.summary,
-    before: input.before,
-    after: input.after,
-    reason: input.reason,
   };
 }
 

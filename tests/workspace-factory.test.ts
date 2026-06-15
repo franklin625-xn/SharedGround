@@ -76,6 +76,58 @@ describe("createDemoWorkspaceState", () => {
       a.evidence.map((ev) => ev.id),
     );
   });
+
+  // ── Phase 1: V0.2 metadata tests ──
+
+  it("emits V0.2 version metadata on all demo sources", () => {
+    const state = createDemoWorkspaceState();
+    for (const source of state.sources) {
+      expect(source.version).toBe(1);
+      expect(source.createdBy).toBeTruthy();
+      expect(source.updatedBy).toBeTruthy();
+      expect(source.createdAt).toBeTruthy();
+      expect(source.updatedAt).toBeTruthy();
+    }
+  });
+
+  it("emits V0.2 version metadata on all demo evidence", () => {
+    const state = createDemoWorkspaceState();
+    for (const ev of state.evidence) {
+      expect(ev.version).toBe(1);
+      expect(ev.createdBy).toBe("system");
+      expect(ev.updatedBy).toBe("system");
+      expect(ev.createdAt).toBeTruthy();
+      expect(ev.updatedAt).toBeTruthy();
+    }
+  });
+
+  it("emits schema version 2", () => {
+    const state = createDemoWorkspaceState();
+    expect(state.schemaVersion).toBe(2);
+  });
+
+  it("emits agentControl with defaults", () => {
+    const state = createDemoWorkspaceState();
+    expect(state.agentControl).toBeDefined();
+    expect(state.agentControl.status).toBe("idle");
+    expect(state.agentControl.maxStepsPerRun).toBe(12);
+    expect(state.agentControl.maxActionsPerStep).toBe(3);
+    expect(state.agentControl.acknowledgedHumanEventIds).toEqual([]);
+    expect(state.agentControl.discardedStaleRunResponseCount).toBe(0);
+    expect(state.agentControl.mode).toBe("idle");
+  });
+
+  it("emits humanMessages as empty array", () => {
+    const state = createDemoWorkspaceState();
+    expect(state.humanMessages).toEqual([]);
+  });
+
+  it("emits brief with version metadata", () => {
+    const state = createDemoWorkspaceState();
+    expect(state.brief.version).toBe(1);
+    expect(state.brief.createdBy).toBe("system");
+    expect(state.brief.createdAt).toBeTruthy();
+  });
 });
 
 describe("createEmptyWorkspaceState", () => {

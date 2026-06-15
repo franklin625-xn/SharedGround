@@ -1,54 +1,37 @@
 # SharedGround
 
-SharedGround is a lightweight shared research workspace for humans and AI agents. It is built to demonstrate one product idea:
+SharedGround is a lightweight shared research workspace for humans and AI agents. It proves one product idea:
 
 > Humans and agents should work on the same visible task state, exchange control at explicit moments, and leave an auditable trail of evidence, decisions, and edits.
 
-This is not a chatbot and not a one-shot report generator. The agent does not just answer in a transcript. It operates through typed actions that mutate shared workspace objects: sources, evidence, notes, claims, human input requests, and the final brief.
+## V0.2: Continuous Action Protocol
 
-## What V0.1 Demonstrates
+V0.2 upgrades the collaboration model from round-based state replacement to a **browser-owned continuous action protocol**:
 
-- A human and an agent share one workspace state.
-- The agent advances work through structured actions.
-- The human can directly edit sources, evidence, notes, claims, and the brief.
-- The agent can request human direction and wait instead of guessing.
-- The reducer enforces permissions, so the agent cannot answer human requests or finalize claims.
-- The activity log records accepted and rejected actions.
-- The evaluation page summarizes outcome quality, collaboration process, and traceability.
+- **Agent works in small steps.** Each step rereads the latest workspace, proposes actions, and the browser applies them locally.
+- **Human always wins.** Human edits apply immediately. If the Agent tries to update a stale object, the reducer rejects with `STALE_OBJECT_VERSION`.
+- **Versioned objects.** Every source, evidence, note, claim, and the brief has version metadata. Version mismatches are detected and rejected.
+- **Brief derivation.** Agent-drafted Briefs record which claim/evidence versions were used. The system marks the Brief stale when underlying data changes.
+- **Non-blocking human messages.** Humans can send direction signals without creating a blocking request.
+- **Stale response discard.** Pause terminates the current run. Old API responses are discarded by runId/stepId.
+- **Markdown upload.** Humans can upload `.md` files as research sources with content hashing and line-level evidence.
+- **Evaluation V0.2.** Metrics for stale write rejections, human message acknowledgement, source location completeness, accepted agent action rate, and Brief staleness.
 
-## Why It Is Not A Chatbot
+## What It Demonstrates
 
-Chatbots hide collaboration inside a message stream. SharedGround exposes collaboration as workspace state:
-
-```text
-Sources -> Evidence -> Notes -> Claims -> Human Decisions -> Final Brief
-```
-
-The important object is not a reply. It is the evolving state of the research task, including who changed what, which evidence supports which claim, and where the agent handed control back to the human.
+- Human and Agent share one workspace state.
+- Agent advances work through structured, versioned actions.
+- Human can directly edit, upload, and message while Agent runs.
+- Agent re-reads latest state after Human edits.
+- Reducer rejects stale Agent writes and unreviewed-claim citations.
+- Activity log records accepted and rejected actions with version metadata.
+- Evaluation summarizes outcome, process, traceability, and V0.2 safety metrics.
 
 ## Run Locally
 
-Requirements:
-
-- Node.js 20 or newer
-- npm
-
-Install and run:
-
 ```bash
 npm install
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:3000
-```
-
-Useful checks:
-
-```bash
+npm run dev      # http://localhost:3000
 npm run typecheck
 npm run test
 npm run build
@@ -56,50 +39,49 @@ npm run build
 
 ## Agent Modes
 
-The stable demo uses the mock agent by default:
+Mock agent (default, no API key needed):
 
 ```bash
 USE_MOCK_AGENT=true
 ```
 
-To try the real-agent fallback path, create `.env.local` from `.env.example` and set:
+Real agent (requires `.env.local`):
 
 ```bash
 USE_MOCK_AGENT=false
-OPENAI_API_KEY=sk-your-key-here
+OPENAI_API_KEY=***
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-If the real call fails or the API key is missing, the app falls back to the mock agent so the demo remains runnable.
+## Demo Flow (V0.2)
 
-## Demo Flow
+1. **Start Demo** from the landing page.
+2. Click **▶ Start** to begin the agent step loop.
+3. Watch the agent add sources, evidence, notes, and propose claims.
+4. **Edit a claim** while the agent is running — the agent re-reads and adapts.
+5. Click **⏸ Pause** to stop execution; **▶ Resume** to continue.
+6. Use **💬** to send a non-blocking message to the agent.
+7. Upload `.md` files as research sources.
+8. Answer the human input request when prompted.
+9. Review the Brief; verify claims show "📝 Brief" markers.
+10. Edit a reviewed claim — check that the Brief now shows a ⚠ stale warning.
+11. **Complete Task** → **View Evaluation** → export JSON/Markdown.
 
-1. Open the landing page and choose **Start Demo**.
-2. In the workspace, click **Run Agent**.
-3. Inspect the new source, evidence, note, and activity log entries.
-4. Click **Run Agent** again to let the agent propose claims.
-5. Review or revise the claims as the human.
-6. Click **Run Agent** again. The agent should request a human direction choice.
-7. Answer the request.
-8. Click **Run Agent** again. The agent drafts the final brief.
-9. Edit or confirm claims, complete the task, and open **View Evaluation**.
-10. Export `evaluation-summary.json` or `evaluation-summary.md`.
-
-See [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for a timed walkthrough.
+See [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for a detailed walkthrough.
 
 ## Project Structure
 
 ```text
-app/                    Next.js routes and API route
-agent/                  action schema, context builder, mock agent, real-agent call path
-core/                   workspace types, reducer, permissions, event factory
+app/                    Next.js routes and API (agent + agent-step)
+agent/                  action schema, context builder, mock agent, system prompt
+core/                   types, reducer, permissions, event factory, brief-stale selector
 components/             workspace and evaluation UI
 data/                   stable demo task and source corpus
-eval/                   outcome, process, and traceability evaluation
-store/                  Zustand localStorage-backed workspace store
-tests/                  Vitest coverage for core, agent, UI helpers, and evaluation
-docs/                   architecture, attribution, demo, and project review
+eval/                   outcome, process, and traceability evaluation (V0.1 + V0.2)
+store/                  Zustand localStorage-backed workspace store + agent step loop
+tests/                  Vitest coverage (125 tests)
+docs/                   architecture, demo script, attribution, project review
 ```
 
 ## Documentation
@@ -109,8 +91,6 @@ docs/                   architecture, attribution, demo, and project review
 - [Open Source Attribution](docs/OPEN_SOURCE_ATTRIBUTION.md)
 - [Project Review](docs/PROJECT_REVIEW.md)
 
-## V0.1 Boundaries
+## Boundaries
 
-SharedGround V0.1 intentionally does not attempt multi-user collaboration, login, databases, Redis, Docker, FastAPI, vector search, broad web search, long-term memory, multi-agent orchestration, or production deployment hardening.
-
-The default EU industrial policy case is a stable demo corpus, not the boundary of the product idea. The product claim is the collaboration model: shared state, structured actions, controlled autonomy, human authority, and traceable work.
+V0.2 intentionally excludes: multi-user, login, database, Redis, WebSocket, SSE, CRDT, vector search, RAG, PDF/OCR, live web search, multi-agent orchestration, and production deployment.

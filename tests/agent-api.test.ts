@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSystemPrompt } from "@/agent/system-prompt";
 import { buildWorkspaceSnapshot } from "@/agent/build-context";
 import { agentTurnSchema } from "@/agent/action-schema";
 import type { AgentTurn } from "@/agent/action-schema";
 import { createDemoWorkspaceState } from "@/core/workspace-factory";
 import { applyWorkspaceAction } from "@/core/reducer";
+import { POST as agentStepPost } from "@/app/api/agent-step/route";
 
 describe("system prompt", () => {
   it("returns a non-empty string with key sections", () => {
@@ -19,6 +20,10 @@ describe("system prompt", () => {
 });
 
 describe("workspace snapshot", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("includes task, sources, evidence, claims info", () => {
     const state = createDemoWorkspaceState();
     const snapshot = buildWorkspaceSnapshot(state);
@@ -41,6 +46,113 @@ describe("workspace snapshot", () => {
     };
     const snapshot = buildWorkspaceSnapshot(state);
     expect(snapshot).toContain("Should we focus on EVs?");
+  });
+
+  it("includes uploaded Markdown source content as a bounded excerpt", () => {
+    const markdown = [
+      "# Uploaded Policy Memo",
+      "",
+      "Unique markdown body visible to the real agent.",
+      "This line should enter the workspace snapshot.",
+    ].join("\n");
+    const state = applyWorkspaceAction(
+      createDemoWorkspaceState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Uploaded Policy Memo",
+          publisher: "Human Upload",
+          summary: "Uploaded Markdown memo.",
+          fileName: "memo.md",
+          mediaType: "markdown",
+          content: markdown,
+        },
+      },
+      "human",
+    );
+
+    const snapshot = buildWorkspaceSnapshot(state);
+
+    expect(snapshot).toContain("Content excerpt");
+    expect(snapshot).toContain("Unique markdown body visible to the real agent.");
+  });
+
+  it("sends uploaded Markdown source content in the real agent prompt", async () => {
+    const oldUseMock = process.env.USE_MOCK_AGENT;
+    const oldApiKey = process.env.OPENAI_API_KEY;
+    process.env.USE_MOCK_AGENT = "false";
+    process.env.OPENAI_API_KEY = "test-key";
+
+    const markdown = [
+      "# Uploaded Market Note",
+      "",
+      "Prompt-visible markdown body for OpenAI request verification.",
+    ].join("\n");
+    const state = applyWorkspaceAction(
+      createDemoWorkspaceState(),
+      {
+        type: "ADD_SOURCE",
+        payload: {
+          title: "Uploaded Market Note",
+          publisher: "Human Upload",
+          summary: "Uploaded Markdown note.",
+          fileName: "market-note.md",
+          mediaType: "markdown",
+          content: markdown,
+        },
+      },
+      "human",
+    );
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                situation: "Read uploaded source content.",
+                nextGoal: "Wait after verifying context.",
+                actions: [],
+                stopReason: "turn_complete",
+              }),
+            },
+          },
+        ],
+      }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+
+    try {
+      await agentStepPost(
+        new Request("http://localhost/api/agent-step", {
+          method: "POST",
+          body: JSON.stringify({
+            runId: "run-test",
+            stepId: "step-test",
+            workspace: state,
+          }),
+        }),
+      );
+    } finally {
+      if (oldUseMock === undefined) {
+        delete process.env.USE_MOCK_AGENT;
+      } else {
+        process.env.USE_MOCK_AGENT = oldUseMock;
+      }
+      if (oldApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = oldApiKey;
+      }
+    }
+
+    const body = JSON.parse(
+      (mockFetch.mock.calls[0]![1] as { body: string }).body,
+    ) as { messages: Array<{ role: string; content: string }> };
+    expect(body.messages[1]!.content).toContain(
+      "Prompt-visible markdown body for OpenAI request verification.",
+    );
   });
 });
 
@@ -146,6 +258,28 @@ describe("agent turn schema validation", () => {
 
     const result = agentTurnSchema.safeParse(turn);
     expect(result.success).toBe(false);
+  });
+
+  it("rejects Agent update actions without expectedVersion", () => {
+    const turn = {
+      situation: "Test.",
+      nextGoal: "Test.",
+      actions: [
+        {
+          type: "UPDATE_CLAIM",
+          payload: {
+            claimId: "claim-1",
+            statement: "Missing expectedVersion.",
+          },
+          reason: "Test.",
+        },
+      ],
+      stopReason: "turn_complete",
+    };
+
+    const result = agentTurnSchema.safeParse(turn);
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toContain("expectedVersion");
   });
 });
 

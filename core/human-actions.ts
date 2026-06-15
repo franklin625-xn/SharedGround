@@ -6,6 +6,9 @@ type SourceForm = {
   url?: string;
   publishedAt?: string;
   summary: string;
+  fileName?: string;
+  mediaType?: "markdown" | "demo" | "manual";
+  content?: string;
 };
 
 type EditSourceForm = SourceForm & {
@@ -16,12 +19,20 @@ type EvidenceForm = {
   sourceId: string;
   quoteOrFinding: string;
   relevance: string;
+  section?: string;
+  startLine?: number;
+  endLine?: number;
+  polarity?: "supporting" | "counter" | "context";
 };
 
 type EditEvidenceForm = {
   evidenceId: string;
   quoteOrFinding: string;
   relevance: string;
+  section?: string;
+  startLine?: number;
+  endLine?: number;
+  polarity?: "supporting" | "counter" | "context";
 };
 
 type NoteForm = {
@@ -59,9 +70,30 @@ export function buildAddSourceAction(form: SourceForm): WorkspaceAction {
       url: cleanOptional(form.url),
       publishedAt: cleanOptional(form.publishedAt),
       summary: clean(form.summary),
+      fileName: cleanOptional(form.fileName),
+      mediaType: form.mediaType,
+      content: form.content,
     },
     reason: "Human added a source.",
   };
+}
+
+/** Build multiple ADD_SOURCE actions from an array of uploaded Markdown files. */
+export function buildAddSourceFromFiles(
+  files: { name: string; content: string }[],
+): WorkspaceAction[] {
+  return files.map((f) => ({
+    type: "ADD_SOURCE" as const,
+    payload: {
+      title: f.name.replace(/\.md$/i, ""),
+      publisher: "Uploaded",
+      summary: f.content.slice(0, 200).replace(/\n/g, " "),
+      fileName: f.name,
+      mediaType: "markdown" as const,
+      content: f.content,
+    },
+    reason: "Human uploaded a Markdown file.",
+  }));
 }
 
 export function buildEditSourceAction(form: EditSourceForm): WorkspaceAction {
@@ -86,6 +118,10 @@ export function buildAddEvidenceAction(form: EvidenceForm): WorkspaceAction {
       sourceId: clean(form.sourceId),
       quoteOrFinding: clean(form.quoteOrFinding),
       relevance: clean(form.relevance),
+      section: cleanOptional(form.section),
+      startLine: form.startLine,
+      endLine: form.endLine,
+      polarity: form.polarity,
     },
     reason: "Human added evidence.",
   };
@@ -100,6 +136,10 @@ export function buildEditEvidenceAction(
       evidenceId: form.evidenceId,
       quoteOrFinding: clean(form.quoteOrFinding),
       relevance: clean(form.relevance),
+      section: cleanOptional(form.section),
+      startLine: form.startLine,
+      endLine: form.endLine,
+      polarity: form.polarity,
     },
     reason: "Human edited evidence.",
   };
@@ -234,5 +274,19 @@ export function buildFinishTaskAction(): WorkspaceAction {
     type: "FINISH",
     payload: {},
     reason: "Human completed the task.",
+  };
+}
+
+export function buildSendTeammateMessageAction(
+  content: string,
+  relatedObjectIds: string[],
+): WorkspaceAction {
+  return {
+    type: "SEND_TEAMMATE_MESSAGE",
+    payload: {
+      content: clean(content),
+      relatedObjectIds,
+    },
+    reason: "Human sent a teammate message.",
   };
 }

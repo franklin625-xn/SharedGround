@@ -8,6 +8,7 @@ import type { WorkspaceState } from "@/core/types";
 
 function workspace(): WorkspaceState {
   return {
+    schemaVersion: 2,
     task: {
       id: "task-1",
       title: "EU industrial policy and Chinese investment",
@@ -24,9 +25,22 @@ function workspace(): WorkspaceState {
       markdown: "# Brief",
       updatedBy: "human",
       updatedAt: "2026-06-15T00:00:00.000Z",
+      version: 1,
+      createdAt: "2026-06-15T00:00:00.000Z",
+      createdBy: "system",
     },
     events: [],
     agentStatus: "completed",
+    agentControl: {
+      status: "completed",
+      stepCountInRun: 0,
+      maxStepsPerRun: 12,
+      maxActionsPerStep: 3,
+      acknowledgedHumanEventIds: [],
+      discardedStaleRunResponseCount: 0,
+      mode: "mock",
+    },
+    humanMessages: [],
     completed: true,
   };
 }
@@ -41,6 +55,7 @@ function summary(): EvaluationSummary {
       groundedClaimRate: 1,
       citationIntegrityRate: 1,
       missingCitationIds: [],
+      briefStaleDetected: false,
     },
     process: {
       agentActionCount: 3,
@@ -55,6 +70,20 @@ function summary(): EvaluationSummary {
       correctWaitCount: 1,
       unauthorizedActionCount: 0,
       respectedHumanModification: true,
+      staleWriteRejectionCount: 0,
+      humanMessageCount: 0,
+      acknowledgedHumanMessageCount: 0,
+      humanMessageAckRate: 0,
+      acceptedAgentActionCount: 2,
+      totalAgentApplyResults: 3,
+      acceptedAgentActionRate: 0.67,
+      discardedStaleRunResponseCount: 0,
+      repeatedStaleWriteCount: 0,
+      duplicateSourceCount: 0,
+      messageResolutionRate: 1,
+      agentReplyWithoutActionCount: 0,
+      humanRevisionResolutionRate: 1,
+      unresolvedHumanRevisionCount: 0,
     },
     traceability: {
       items: [
@@ -70,6 +99,11 @@ function summary(): EvaluationSummary {
       completeTraceCount: 1,
       totalTraceCount: 1,
       completeTraceRate: 1,
+      evidenceWithSourceVersionCount: 1,
+      evidenceWithSourceHashCount: 1,
+      evidenceWithValidLineRange: 0,
+      totalAgentExtractedEvidence: 1,
+      sourceLocationCompletenessRate: 0,
     },
   };
 }

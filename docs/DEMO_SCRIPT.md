@@ -1,178 +1,100 @@
-# SharedGround Demo Script
+# SharedGround V0.2 Demo Script
 
-This walkthrough is designed for a 5-7 minute evaluator demo.
+7-10 minute evaluator demo covering the continuous action protocol.
 
 ## Setup
 
-Run:
-
 ```bash
-npm install
-npm run dev
+npm install && npm run dev
+# → http://localhost:3000
+# USE_MOCK_AGENT=true (default)
 ```
 
-Open:
+## Narrative Hook
 
-```text
-http://localhost:3000
-```
-
-Use the default mock-agent mode for the most stable demo:
-
-```bash
-USE_MOCK_AGENT=true
-```
-
-## Demo Narrative
-
-Position the project in one sentence:
-
-> SharedGround is not a chatbot. It is a shared research workspace where the agent changes visible research objects, asks for human judgment at the right time, and leaves an auditable trail.
+> SharedGround V0.2 proves that a human and an agent can work on the same shared workspace continuously — not in isolated turns. The human can edit, upload, and send messages while the agent is running. Stale writes are rejected. The Brief detects when it's out of date.
 
 ## Walkthrough
 
-### 1. Start The Demo
+### 1. Start Demo
 
-On the landing page, click **Start Demo**.
+Landing page → **Start Demo**. Default EU industrial policy corpus loads.
 
-Point out:
+### 2. Agent Step Loop
 
-- the default task is about EU industrial policy and Chinese investment in Europe;
-- this is a stable corpus for demonstration;
-- a custom task can be created, but broad live search is outside V0.1.
+Click **▶ Start**. The agent begins a multi-step research pass:
 
-### 2. Show The Empty Shared Workspace
+- Step 1: adds source + evidence + note
+- Step 2: proposes claims
+- Step 3: requests human direction
 
-On `/workspace`, identify the main regions:
+Point out the status bar shows the current goal and step progress.
 
-- sources, evidence, and notes on the left;
-- claims and final brief in the center;
-- activity log on the right;
-- agent controls and status in the top bar.
+### 3. Human Edit During Run
 
-Explain that the agent and human are not chatting. They are operating on these shared objects.
+While the agent is running, **edit a source** or **revise a claim**. Show that:
 
-### 3. Run Agent: Initial Research Pass
+- The human edit applies immediately.
+- The agent re-reads the latest workspace on its next step.
+- The activity log records both human and agent events interleaved.
 
-Click **Run Agent** once.
+### 4. Stale Write Rejection
 
-Expected result:
+Click **⏸ Pause**, then edit the same claim again (version increments). Click **▶ Resume**. The agent may try to update with the old version. Show:
 
-- the agent adds a synthesized source;
-- the agent extracts evidence;
-- the agent writes a research note;
-- the activity log records the actions.
+- An `ACTION_REJECTED` event with rejection code `STALE_OBJECT_VERSION` in the activity log.
+- The agent re-reads and continues with the current version.
 
-Evaluation point:
+### 5. Teammate Messages
 
-> The agent is not producing a hidden answer. It is making state changes that the human can inspect and edit.
+Open the right-side **Messages** tab, type "Focus on EV batteries please" and click **Send**. Show:
 
-### 4. Run Agent: Claim Proposal
+- Message appears with `pending` status.
+- A `SEND_TEAMMATE_MESSAGE` event is created.
+- Click **Send & Run** for a second message to trigger exactly one agent step.
+- Agent replies with a visible `REPLY_TEAMMATE_MESSAGE` and uses structured actions for actual workspace changes.
 
-Click **Run Agent** again.
+### 6. Markdown Upload
 
-Expected result:
+Click **Upload .md** and select 1-3 markdown files. Show:
 
-- the agent proposes reviewable claims;
-- claims include evidence links and confidence;
-- claim status starts as `ai_proposed`.
+- Each file becomes a source with `contentHash` and `lineCount`.
+- Evidence can now reference line ranges (startLine/endLine).
+- Uploading identical Markdown shows "This file is identical to an existing source" and offers **Skip** or **Replace existing**.
 
-Evaluation point:
+### 7. Human Input Request
 
-> Claims are not final. The human remains responsible for confirmation, revision, contesting, or finalization.
+Continue running. Agent asks for direction. Answer the request. Agent drafts the Brief.
 
-### 5. Human Review
-
-Open a claim and revise or confirm it.
-
-Good demo actions:
-
-- mark one claim as human confirmed;
-- revise one claim with a human decision note;
-- optionally contest a claim if counter-evidence is available.
-
-Point out that these changes become events. The activity log records human authority, not just agent output.
-
-### 6. Run Agent: Human Direction Request
-
-Click **Run Agent** again.
-
-Expected result:
-
-- the agent asks which final-brief emphasis to use;
-- the request appears as a human input banner;
-- the agent status becomes `waiting_for_human`.
-
-Evaluation point:
-
-> The agent does not guess when the next step requires a human framing decision.
-
-### 7. Show Wait Behavior
-
-Before answering the request, click **Run Agent** again.
-
-Expected result:
-
-- the agent waits;
-- no brief is drafted;
-- the log records the wait.
-
-Evaluation point:
-
-> Controlled autonomy means knowing when not to act.
-
-### 8. Answer The Human Request
-
-Answer:
-
-```text
-Focus the final brief on EV batteries and localization strategy.
-```
-
-Expected result:
-
-- the request becomes answered;
-- the event log records the human answer.
-
-### 9. Run Agent: Draft Brief
-
-Click **Run Agent** again.
-
-Expected result:
-
-- the agent drafts a final brief;
-- the brief includes the human-selected direction;
-- the brief remains editable by the human.
-
-Point out that this is the first moment where a report-like artifact appears, after shared sources, evidence, notes, claims, and a human control handoff already happened.
-
-### 10. Complete And Evaluate
-
-Click **Complete Task**, then **View Evaluation**.
+### 8. Brief Derivation & Stale Detection
 
 Show:
 
-- outcome metrics;
-- collaboration process metrics;
-- traceability metrics.
+- Brief displays "Based on N claims, M evidence — drafted by agent".
+- Claims cited in the Brief show **📝 Brief** markers.
+- **Edit a reviewed claim** (change its status or statement).
+- The Brief now shows **⚠ Brief may be out of date** banner.
 
-Export:
+### 9. Complete & Evaluate
 
-- `evaluation-summary.json`;
-- `evaluation-summary.md`.
+**Complete Task** → **View Evaluation**. Show V0.2 metrics:
 
-Evaluation point:
+- Stale write rejections count.
+- Human message acknowledgement rate.
+- Source location completeness.
+- Accepted agent action rate.
+- Brief stale detection.
+- Human revision resolution rate.
+- Duplicate source attempts.
 
-> The project evaluates the collaboration process, not only the final prose.
+Export as JSON/Markdown, then use **Export Debug Bundle** from the workspace header to inspect storage diagnostics.
 
-## Failure-Safe Notes
+### 10. Closing
 
-If a real model call fails, the app falls back to the mock agent and shows an agent fallback banner. Continue the demo with the mock trajectory.
+> V0.2 upgrades SharedGround from round-based state replacement to a browser-owned continuous action protocol. Human edits always win, stale Agent writes are detected, Brief freshness is computable, and the collaboration process is auditable with version-level granularity.
 
-If localStorage contains an old state, use **Reset** or return to the landing page and click **Start Demo** again.
+## Failure-Safe
 
-## Closing Summary
-
-End with:
-
-> V0.1 proves the collaboration loop: shared workspace, structured agent actions, human edits, explicit request/wait handoff, final brief, and evaluation exports. It does not try to prove broad autonomous research or production infrastructure.
+- Real API fails → mock agent fallback with banner.
+- localStorage quota failure → current memory state remains active; export a Debug Bundle, then reset or clean old audit data.
+- Page refresh during run → agent status shows "paused"; click **▶ Resume**.

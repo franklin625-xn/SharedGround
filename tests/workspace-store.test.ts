@@ -1,11 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { applyWorkspaceAction } from "@/core/reducer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyWorkspaceAction, applyWorkspaceActionWithResult } from "@/core/reducer";
 import { resetEventCounterForTests } from "@/core/event-factory";
 import { resetObjectCounterForTests } from "@/core/reducer";
 import {
   createDemoWorkspaceState,
   createEmptyWorkspaceState,
 } from "@/core/workspace-factory";
+import { useWorkspaceStore } from "@/store/workspace-store";
 import type { WorkspaceAction } from "@/core/schemas";
 import type { WorkspaceState } from "@/core/types";
 
@@ -207,5 +208,269 @@ describe("JSON serialization round-trip", () => {
     expect(restored.claims[0]?.statement).toContain("localization pressure");
     expect(restored.sources).toHaveLength(8);
     expect(restored).toEqual(afterAction);
+  });
+});
+
+// ── Phase 4: Agent Step Loop ──────────────────────────────────────────
+
+function mockStepResponse(overrides?: Partial<{
+  actions: WorkspaceAction[];
+  acknowledgedHumanEventIds: string[];
+  stopReason: string;
+  nextGoal: string;
+}>) {
+  return {
+    turn: {
+      situation: "Test step.",
+      nextGoal: overrides?.nextGoal ?? "Advancing research.",
+      actions: overrides?.actions ?? [{
+        type: "ADD_SOURCE" as const,
+        payload: { title: "Step Source", publisher: "Test", summary: "Added by agent step." },
+        reason: "Test step action.",
+      }],
+      acknowledgedHumanEventIds: overrides?.acknowledgedHumanEventIds,
+      stopReason: overrides?.stopReason ?? "turn_complete",
+    },
+    source: "mock",
+    usedFallback: false,
+  };
+}
+
+describe("agent step loop", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetEventCounterForTests();
+    resetObjectCounterForTests();
+    useWorkspaceStore.setState({
+      workspace: createDemoWorkspaceState(),
+      agentError: null,
+      agentMode: "idle",
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("startAgent creates runId, sets status to running, writes AGENT_STARTED event", () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({ stopReason: "task_complete" }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+
+    useWorkspaceStore.getState().startAgent();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.workspace.agentControl.status).toBe("running");
+    expect(state.workspace.agentControl.activeRunId).toMatch(/^run-/);
+    expect(state.workspace.agentControl.stepCountInRun).toBe(0);
+
+    // AGENT_STARTED event written
+    const startEvent = state.workspace.events.find(
+      (e) => e.actionType === "AGENT_STARTED",
+    );
+    expect(startEvent).toBeDefined();
+    expect(startEvent!.actor).toBe("system");
+
+    // Advance timers to let step complete
+    vi.advanceTimersToNextTimer();
+  });
+
+  it("pauseAgent aborts, clears runId, writes AGENT_PAUSED event", () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({ stopReason: "turn_complete" }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+
+    useWorkspaceStore.getState().startAgent();
+    useWorkspaceStore.getState().pauseAgent();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.workspace.agentControl.status).toBe("paused");
+    expect(state.workspace.agentControl.activeRunId).toBeUndefined();
+
+    const pauseEvent = state.workspace.events.find(
+      (e) => e.actionType === "AGENT_PAUSED",
+    );
+    expect(pauseEvent).toBeDefined();
+  });
+
+  it("resumeAgent creates new runId, writes AGENT_RESUMED event", () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({ stopReason: "task_complete" }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+
+    useWorkspaceStore.getState().startAgent();
+    useWorkspaceStore.getState().pauseAgent();
+
+    const pausedRunId = useWorkspaceStore.getState().workspace.events
+      .filter((e) => e.actionType === "AGENT_PAUSED")
+      .at(-1);
+
+    useWorkspaceStore.getState().resumeAgent();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.workspace.agentControl.status).toBe("running");
+    expect(state.workspace.agentControl.activeRunId).toMatch(/^run-/);
+
+    const resumeEvent = state.workspace.events.find(
+      (e) => e.actionType === "AGENT_RESUMED",
+    );
+    expect(resumeEvent).toBeDefined();
+  });
+
+  it("agent applies step actions to workspace and increments step count", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({
+        actions: [{
+          type: "ADD_EVIDENCE" as const,
+          payload: {
+            sourceId: "demo-source-001",
+            quoteOrFinding: "Step evidence.",
+            relevance: "Test.",
+          },
+          reason: "Step action.",
+        }],
+        stopReason: "task_complete",
+        nextGoal: "Done.",
+      }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+
+    const demoState = createDemoWorkspaceState();
+    useWorkspaceStore.setState({ workspace: demoState });
+
+    useWorkspaceStore.getState().startAgent();
+
+    // Let the step run (it calls setTimeout(0))
+    await vi.advanceTimersToNextTimerAsync();
+
+    const state = useWorkspaceStore.getState();
+    // Evidence should have increased
+    expect(state.workspace.evidence.length).toBeGreaterThan(demoState.evidence.length);
+  });
+
+  it("persists only existing unique human acknowledgement event IDs", async () => {
+    const withMessage = applyWorkspaceAction(
+      createDemoWorkspaceState(),
+      {
+        type: "SEND_TEAMMATE_MESSAGE",
+        payload: {
+          content: "Please prioritize the uploaded Markdown source.",
+          relatedObjectIds: [],
+        },
+      },
+      "human",
+    );
+    const humanEventId = withMessage.events.at(-1)!.id;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({
+        actions: [],
+        acknowledgedHumanEventIds: [humanEventId, "missing-event", humanEventId],
+        stopReason: "task_complete",
+      }),
+    });
+    globalThis.fetch = mockFetch as unknown as typeof globalThis.fetch;
+    useWorkspaceStore.setState({ workspace: withMessage });
+
+    useWorkspaceStore.getState().startAgent();
+    await vi.advanceTimersToNextTimerAsync();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.workspace.agentControl.acknowledgedHumanEventIds).toEqual([
+      humanEventId,
+    ]);
+  });
+
+  it("Human edit between steps causes Agent stale rejection and re-read", async () => {
+    // Step 1: Agent proposes a claim
+    const step1Fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockStepResponse({
+        actions: [{
+          type: "PROPOSE_CLAIM" as const,
+          payload: {
+            statement: "Agent claim v1.",
+            reasoning: "Based on evidence.",
+            supportingEvidenceIds: ["demo-evidence-001"],
+            counterEvidenceIds: [],
+          },
+          reason: "Step 1.",
+        }],
+        stopReason: "turn_complete",
+        nextGoal: "Claims proposed.",
+      }),
+    });
+
+    globalThis.fetch = step1Fetch as unknown as typeof globalThis.fetch;
+    useWorkspaceStore.getState().startAgent();
+    await vi.advanceTimersToNextTimerAsync();
+
+    // After step 1, Human edits the claim (pushes version to 2)
+    const afterStep1 = useWorkspaceStore.getState();
+    const claimId = afterStep1.workspace.claims[0]!.id;
+    expect(afterStep1.workspace.claims[0]!.version).toBe(1);
+
+    const { state: humanEdited } = applyWorkspaceActionWithResult(
+      afterStep1.workspace,
+      {
+        type: "UPDATE_CLAIM",
+        payload: { claimId, status: "human_revised", humanDecisionNote: "Revised." },
+      },
+      "human",
+    );
+    useWorkspaceStore.setState({ workspace: humanEdited });
+    expect(useWorkspaceStore.getState().workspace.claims[0]!.version).toBe(2);
+
+    // Override fetch to verify Agent re-reads latest state
+    // The Agent will try to update with stale expectedVersion
+    const stepCalls: WorkspaceState[] = [];
+    const step2Fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse((init as { body: string }).body) as { workspace: WorkspaceState };
+      stepCalls.push(body.workspace);
+
+      // Simulate Agent returning stale update
+      return {
+        ok: true,
+        json: async () => mockStepResponse({
+          actions: [{
+            type: "UPDATE_CLAIM" as const,
+            payload: {
+              claimId,
+              statement: "Stale update.",
+              expectedVersion: 1,  // Stale!
+            },
+            reason: "Step 2 — stale.",
+          }],
+          stopReason: "turn_complete",
+          nextGoal: "Failed attempt.",
+        }),
+      };
+    });
+
+    globalThis.fetch = step2Fetch as unknown as typeof globalThis.fetch;
+
+    // Wait for step 2
+    await vi.advanceTimersToNextTimerAsync();
+
+    // Verify Agent received the latest workspace (with claim v2)
+    const sentWorkspace = stepCalls[0];
+    expect(sentWorkspace).toBeDefined();
+    expect(sentWorkspace!.claims[0]!.version).toBe(2);
+
+    // Verify the stale action was rejected
+    const finalState = useWorkspaceStore.getState();
+    const rejectionEvent = finalState.workspace.events.find(
+      (e) => e.rejectionCode === "STALE_OBJECT_VERSION",
+    );
+    expect(rejectionEvent).toBeDefined();
   });
 });

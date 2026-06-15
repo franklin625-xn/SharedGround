@@ -2,18 +2,24 @@
 
 import React from "react";
 import type { WorkspaceAction } from "@/core/schemas";
-import type { Claim, Evidence } from "@/core/types";
+import type { BriefDerivation, Claim, Evidence } from "@/core/types";
 import { ClaimCard } from "@/components/workspace/claim-card";
 
 export function ClaimsPanel({
   claims,
   evidence,
+  briefDerivation,
   onAction,
 }: {
   claims: Claim[];
   evidence: Evidence[];
+  briefDerivation?: BriefDerivation;
   onAction: (action: WorkspaceAction) => void;
 }) {
+  const briefClaimIds = new Set(
+    briefDerivation ? Object.keys(briefDerivation.claimVersions) : [],
+  );
+
   return (
     <section>
       <h3 className="panel-title">Claims / Analysis ({claims.length})</h3>
@@ -28,6 +34,7 @@ export function ClaimsPanel({
             key={claim.id}
             claim={claim}
             evidence={evidence}
+            inBrief={briefClaimIds.has(claim.id)}
             onAction={onAction}
           />
         ))}
